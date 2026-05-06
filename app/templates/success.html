@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Оплата прошла успешно</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="flex min-h-screen items-center justify-center px-4 py-10">
+    <div class="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-black/30 md:p-10">
+      <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-3xl">
+        ✅
+      </div>
+
+      <div class="mt-6 text-center">
+        <div class="text-xs uppercase tracking-[0.25em] text-slate-500">SwoiVPN</div>
+        <h1 class="mt-3 text-3xl font-bold text-white md:text-4xl">
+          Оплата прошла успешно
+        </h1>
+        <p class="mt-4 text-sm leading-6 text-slate-400 md:text-base">
+          Платёж принят. Вернитесь в Telegram-бота, чтобы продолжить работу с подпиской,
+          проверить статус услуги или открыть личный кабинет.
+        </p>
+      </div>
+
+      <div class="mt-8 grid gap-4 md:grid-cols-3">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Статус</div>
+          <div class="mt-2 text-sm font-semibold text-emerald-300">Успешно</div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Следующий шаг</div>
+          <div class="mt-2 text-sm font-semibold text-white">Вернуться в бота</div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Управление</div>
+          <div class="mt-2 text-sm font-semibold text-white">Через Telegram</div>
+        </div>
+      </div>
+
+      <div class="mt-8 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4 text-sm leading-6 text-slate-300">
+        После возврата в бота можно проверить:
+        статус оплаты, активацию подписки, продление, трафик и доступные действия по услуге.
+      </div>
+
+      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+        {% if bot_username %}
+          <a
+            href="https://t.me/{{ bot_username }}"
+            class="inline-flex w-full items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 sm:w-auto"
+          >
+            Открыть Telegram-бота
+          </a>
+        {% else %}
+          <a
+            href="/"
+            class="inline-flex w-full items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 sm:w-auto"
+          >
+            Перейти дальше
+          </a>
+        {% endif %}
+
+        <button
+          type="button"
+          onclick="window.close()"
+          class="inline-flex w-full items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:border-cyan-500 hover:text-white sm:w-auto"
+        >
+          Закрыть страницу
+        </button>
+      </div>
+
+      {% if bot_username %}
+      <div class="mt-6 text-center text-xs text-slate-500">
+        Если кнопка не сработала, откройте вручную:
+        <span class="text-slate-300">@{{ bot_username }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </main>
+</body>
+</html>

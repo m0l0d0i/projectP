@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Люди и уведомления{% endblock %}
+
+{% block content %}
+{% set support_status = (settings_row.support_chat_test_last_status or 'never') %}
+{% set status_badge_class =
+  'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+  if support_status == 'ok'
+  else 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+  if support_status in ['never', 'degraded']
+  else 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+%}
+
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Люди и уведомления</div>
+      <h1 class="mt-4 flex items-center gap-2 text-3xl font-bold text-white">
+        <span>Люди и уведомления</span>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Здесь настраиваются Telegram ID администраторов, операторов поддержки, служебных получателей уведомлений и чат поддержки."
+          aria-label="Подсказка о разделе людей и уведомлений"
+        >?</button>
+      </h1>
+      <p class="mt-2 max-w-3xl text-slate-400">
+        Управление администраторами, поддержкой, служебными получателями уведомлений и support chat.
+        Все значения ниже сохраняются в singleton-настройки приложения.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Web-admin работает в local-only режиме и должен открываться через SSH-туннель.
+      </p>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-6 xl:grid-cols-3">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-2">
+      <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+        <span>Telegram ID и служебные получатели</span>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Поддерживаются значения через запятую, пробел или новую строку. Для групп и супергрупп Telegram ID обычно начинается с -100."
+          aria-label="Подсказка о формате Telegram ID"
+        >?</button>
+      </h2>
+      <p class="mt-2 text-sm text-slate-400">
+        Указывай ID через запятую, пробел или новую строку.
+        Для чатов обычно используется формат <span class="text-slate-200">-100xxxxxxxxxx</span>.
+      </p>
+
+      <form method="post" action="/admin/people/" class="mt-6 grid gap-5">
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>ID администраторов</span>
+            <button
+              type="button"
+              class="help-dot"
+              data-tooltip="Telegram ID пользователей, которым доступны административные действия в боте и web-admin."
+              aria-label="Подсказка об ID администраторов"
+            >?</button>
+          </label>
+          <textarea
+            name="admin_ids"
+            rows="3"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            placeholder="Например: 123456789, 987654321"
+          >{{ admin_ids_text }}</textarea>
+          <p class="mt-2 text-xs text-slate-500">
+            Эти Telegram ID получают доступ к административным действиям.
+          </p>
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>ID поддержки</span>
+            <button
+              type="button"
+              class="help-dot"
+              data-tooltip="Telegram ID операторов поддержки. Используются для тикетов, ответов в support и резервной доставки системных сообщений."
+              aria-label="Подсказка об ID поддержки"
+            >?</button>
+          </label>
+          <textarea
+            name="support_ids"
+            rows="3"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            placeholder="Например: 111111111, 222222222"
+          >{{ support_ids_text }}</textarea>
+          <p class="mt-2 text-xs text-slate-500">
+            Эти ID используются для операторов поддержки.
+          </p>
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>ID получателей служебных уведомлений</span>
+            <button
+              type="button"
+              class="help-dot"
+              data-tooltip="На эти Telegram ID бот может отправлять сообщения о старте, диагностике, ошибках, платежах и других системных событиях."
+              aria-label="Подсказка об ID получателей служебных уведомлений"
+            >?</button>
+          </label>
+          <textarea
+            name="startup_notify_ids"
+            rows="3"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            placeholder="Например: 333333333, 444444444"
+          >{{ startup_notify_ids_text }}</textarea>
+          <p class="mt-2 text-xs text-slate-500">
+            Сюда отправляются системные уведомления о старте и диагностике.
+          </p>
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>ID чата поддержки</span>
+            <button
+              type="button"
+              class="help-dot"
+              data-tooltip="ID группы или супергруппы, куда бот пересылает сообщения пользователей из поддержки. Обычно начинается с -100."
+              aria-label="Подсказка об ID чата поддержки"
+            >?</button>
+          </label>
+          <input
+            type="text"
+            name="support_chat_id"
+            value="{{ settings_row.support_chat_id or '' }}"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            placeholder="-100xxxxxxxxxx"
+          >
+          <p class="mt-2 text-xs text-slate-500">
+            ID группы или супергруппы, куда бот должен пересылать support-сообщения.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+          <button
+            type="submit"
+            class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+          >
+            Сохранить настройки
+          </button>
+
+          <a
+            href="/admin/system/"
+            class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          >
+            На главную
+          </a>
+        </div>
+      </form>
+    </div>
+
+    <div class="space-y-6">
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+              <span>Проверка чата поддержки</span>
+              <button
+                type="button"
+                class="help-dot"
+                data-tooltip="Быстрая проверка того, что бот добавлен в чат поддержки и действительно может отправлять туда сообщения."
+                aria-label="Подсказка о проверке чата поддержки"
+              >?</button>
+            </h2>
+            <p class="mt-2 text-sm text-slate-400">
+              Быстрая проверка того, что бот может отправлять сообщения в чат поддержки.
+            </p>
+          </div>
+          <span class="rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide {{ status_badge_class }}">
+            {{ support_status }}
+          </span>
+        </div>
+
+        <form method="post" action="/admin/people/test-support-chat" class="mt-5">
+          <button
+            type="submit"
+            class="inline-flex w-full items-center justify-center rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-white"
+            title="Отправить тестовое сообщение в чат поддержки"
+          >
+            Проверить чат поддержки
+          </button>
+        </form>
+      </div>
+
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+          <span>Последний результат проверки</span>
+          <button
+            type="button"
+            class="help-dot"
+            data-tooltip="Показывает результат последнего теста чата поддержки: статус, ошибку и текущий ID чата."
+            aria-label="Подсказка о последнем результате проверки"
+          >?</button>
+        </h2>
+
+        <div class="mt-5 space-y-4">
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Статус</div>
+            <div class="mt-2 text-sm font-medium text-white">
+              {{ settings_row.support_chat_test_last_status or 'Не запускалась' }}
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Ошибка</div>
+            <div class="mt-2 break-words text-sm text-slate-300">
+              {{ settings_row.support_chat_test_last_error or 'Не зафиксирована' }}
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Текущий ID чата поддержки</div>
+            <div class="mt-2 text-sm text-white">
+              {{ settings_row.support_chat_id or 'Не задан' }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+          <span>Что проверить перед запуском</span>
+          <button
+            type="button"
+            class="help-dot"
+            data-tooltip="Полезно перед первым запуском поддержки: бот должен быть добавлен в чат, иметь право писать сообщения, а ID чата должен быть указан без ошибок."
+            aria-label="Подсказка о подготовке чата поддержки"
+          >?</button>
+        </h2>
+        <p class="mt-3 text-sm leading-6 text-slate-400">
+          В <span class="text-slate-200">admin_ids</span> и <span class="text-slate-200">support_ids</span>
+          хранятся Telegram ID пользователей, которым доступны административные или support-действия.
+        </p>
+        <p class="mt-3 text-sm leading-6 text-slate-400">
+          Если тест чата поддержки завершается ошибкой, сначала проверь:
+          добавлен ли бот в чат, выданы ли ему права на отправку сообщений и корректен ли
+          <span class="text-slate-200">support_chat_id</span>.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

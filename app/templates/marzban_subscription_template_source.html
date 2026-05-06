@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>😎 SwoiVPN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+{% set show_usage_block_enabled = [[show_usage_block]] %}
+{% set show_subscription_copy_button_enabled = [[show_subscription_copy_button]] %}
+{% set show_platform_cards_enabled = [[show_platform_cards]] %}
+
+{% set show_primary_connect_button_enabled = [[show_primary_connect_button]] %}
+{% set show_one_click_block_enabled = [[show_one_click_block]] %}
+{% set show_hiddify_button_enabled = [[show_hiddify_button]] %}
+{% set show_v2raytun_button_enabled = [[show_v2raytun_button]] %}
+{% set show_happ_button_enabled = [[show_happ_button]] %}
+{% set show_qr_button_enabled = [[show_qr_button]] %}
+
+{% set has_one_click_apps = show_hiddify_button_enabled or show_v2raytun_button_enabled or show_happ_button_enabled %}
+{% set has_primary_buttons = show_primary_connect_button_enabled or show_subscription_copy_button_enabled %}
+
+{% set status_code = user.status.value %}
+{% set is_unlimited = (not user.data_limit) %}
+{% set used_bytes = user.used_traffic or 0 %}
+
+{% if is_unlimited %}
+  {% set traffic_percent = 100 %}
+  {% set remaining_label = 'Безлимит' %}
+{% else %}
+  {% set traffic_percent = ((used_bytes / user.data_limit) * 100) | round(0, 'floor') | int %}
+  {% if traffic_percent < 0 %}{% set traffic_percent = 0 %}{% endif %}
+  {% if traffic_percent > 100 %}{% set traffic_percent = 100 %}{% endif %}
+  {% set remaining_bytes = user.data_limit - used_bytes %}
+  {% if remaining_bytes < 0 %}{% set remaining_bytes = 0 %}{% endif %}
+  {% set remaining_label = remaining_bytes | bytesformat %}
+{% endif %}
+
+{% if user.expire %}
+  {% set current_timestamp = now().timestamp() %}
+  {% set remaining_days = ((user.expire - current_timestamp) // (24 * 3600)) | int %}
+  {% if remaining_days < 0 %}{% set remaining_days = 0 %}{% endif %}
+  {% set expire_label = user.expire | datetime %}
+{% else %}
+  {% set remaining_days = None %}
+  {% set expire_label = 'Без ограничения' %}
+{% endif %}
+
+{% set page_url = subscription_url if subscription_url is defined and subscription_url else '' %}
+{% set has_page_actions = has_primary_buttons or (show_one_click_block_enabled and has_one_click_apps) or show_qr_button_enabled %}
+
+<body
+  class="min-h-screen bg-slate-950 text-slate-100"
+  data-page-url="{{ page_url | e }}"
+  data-subscription-name="😎 SwoiVPN"
+>
+  <div class="relative overflow-hidden">
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.18),transparent_30%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.14),transparent_28%)]"></div>
+
+    <div class="relative mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+      <div class="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div class="text-sm font-semibold uppercase tracking-[0.3em] text-cyan-300">[[brand_name]]</div>
+          <h1 class="mt-3 text-4xl font-bold tracking-tight text-white">[[hero_title]]</h1>
+          <p class="mt-4 max-w-3xl text-base leading-7 text-slate-300">
+            [[hero_text]]
+          </p>
+        </div>
+
+        <div class="inline-flex items-center rounded-full border px-4 py-2 text-sm font-semibold backdrop-blur-md {% if status_code == 'active' %}border-emerald-400/30 bg-emerald-400/10 text-emerald-300{% elif status_code == 'limited' %}border-amber-400/30 bg-amber-400/10 text-amber-300{% else %}border-rose-400/30 bg-rose-400/10 text-rose-300{% endif %}">
+          Статус: {{ status_code }}
+        </div>
+      </div>
+
+      <div class="grid gap-6 {% if show_platform_cards_enabled %}lg:grid-cols-[1.25fr_0.95fr]{% else %}lg:grid-cols-1{% endif %}">
+        <section class="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-md">
+          <div class="mb-6 grid gap-4 sm:grid-cols-2">
+            <div>
+              <div class="text-sm text-slate-400">Имя пользователя</div>
+              <div class="mt-1 break-all text-2xl font-semibold text-white">{{ user.username }}</div>
+            </div>
+            <div>
+              <div class="text-sm text-slate-400">Активно до</div>
+              <div class="mt-1 text-xl font-semibold text-white">{{ expire_label }}</div>
+              {% if remaining_days is not none %}
+              <div class="mt-1 text-sm text-slate-400">Осталось дней: {{ remaining_days }}</div>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if show_usage_block_enabled %}
+          <div class="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
+            <div class="mb-3 flex items-center justify-between gap-4">
+              <div class="text-sm font-medium text-slate-300">Использование трафика</div>
+              <div class="text-right text-sm text-slate-400">
+                {{ user.used_traffic | bytesformat }} / {% if is_unlimited %}Безлимит{% else %}{{ user.data_limit | bytesformat }}{% endif %}
+              </div>
+            </div>
+
+            <div class="h-3 w-full overflow-hidden rounded-full bg-slate-800">
+              <div class="h-full rounded-full bg-gradient-to-r from-cyan-400 via-sky-500 to-emerald-400 transition-all" style="width: {{ traffic_percent }}%;"></div>
+            </div>
+
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
+              <span>Осталось: {{ remaining_label }}</span>
+              {% if user.data_limit_reset_strategy and user.data_limit_reset_strategy.value != 'no_reset' %}
+              <span>Сброс: каждый {{ user.data_limit_reset_strategy.value }}</span>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+
+          {% if has_page_actions %}
+          <div class="mt-6 space-y-3">
+            {% if has_primary_buttons %}
+            <div class="grid gap-3 {% if show_primary_connect_button_enabled and show_subscription_copy_button_enabled %}sm:grid-cols-2{% else %}sm:grid-cols-1{% endif %}">
+              {% if show_primary_connect_button_enabled %}
+              <a
+                id="open-subscription-page"
+                href="{{ page_url }}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-6 py-4 text-base font-semibold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:scale-[1.01] hover:from-cyan-400 hover:to-emerald-400"
+              >
+                [[connect_button_text]]
+              </a>
+              {% endif %}
+
+              {% if show_subscription_copy_button_enabled %}
+              <button
+                type="button"
+                data-copy-page-url
+                class="inline-flex w-full items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-6 py-4 text-base font-semibold text-cyan-300 transition hover:bg-cyan-400/15"
+              >
+                📋 Скопировать ссылку подписки
+              </button>
+              {% endif %}
+            </div>
+            {% endif %}
+
+            {% if show_one_click_block_enabled and has_one_click_apps %}
+            <div class="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
+              <div class="mb-3 text-sm font-medium text-slate-300">Подключить в 1 клик</div>
+              <p class="mb-4 text-sm leading-6 text-slate-400">
+                [[connect_hint_text]]
+              </p>
+
+              <div class="grid gap-3 sm:grid-cols-2 {% if (show_hiddify_button_enabled and show_v2raytun_button_enabled and show_happ_button_enabled) or (show_hiddify_button_enabled and show_v2raytun_button_enabled) or (show_hiddify_button_enabled and show_happ_button_enabled) or (show_v2raytun_button_enabled and show_happ_button_enabled) %}lg:grid-cols-3{% else %}lg:grid-cols-1{% endif %}">
+                {% if show_hiddify_button_enabled %}
+                <a
+                  id="open-in-hiddify"
+                  href="#"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-5 py-4 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-400/15"
+                >
+                  🚀 Открыть в Hiddify
+                </a>
+                {% endif %}
+
+                {% if show_v2raytun_button_enabled %}
+                <a
+                  id="open-in-v2raytun"
+                  href="#"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center justify-center rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-5 py-4 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-400/15"
+                >
+                  🍎 Открыть в v2RayTun
+                </a>
+                {% endif %}
+
+                {% if show_happ_button_enabled %}
+                <a
+                  id="open-in-happ"
+                  href="#"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center justify-center rounded-2xl border border-violet-400/30 bg-violet-400/10 px-5 py-4 text-sm font-semibold text-violet-300 transition hover:bg-violet-400/15"
+                >
+                  📱 Открыть в Happ
+                </a>
+                {% endif %}
+              </div>
+            </div>
+            {% endif %}
+
+            {% if show_qr_button_enabled %}
+            <button
+              type="button"
+              id="show-qr-button"
+              class="inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-6 py-4 text-base font-semibold text-emerald-300 transition hover:bg-emerald-400/15"
+            >
+              🔳 Показать QR-код
+            </button>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          <div
+            id="copy-feedback"
+            class="mt-4 hidden rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-300"
+          ></div>
+
+          <p class="mt-4 text-sm leading-6 text-slate-400">
+            [[support_text]]
+          </p>
+        </section>
+
+        {% if show_platform_cards_enabled %}
+        <section class="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-md">
+          <h2 class="text-xl font-semibold text-white">[[platforms_title]]</h2>
+          <p class="mt-2 text-sm text-slate-400">[[platforms_subtitle]]</p>
+
+          <div class="mt-6 grid gap-4 sm:grid-cols-2">
+            {% set platform_items = [
+              ('android', '[[android_title]]', '[[android_emoji]]', '[[android_download_url]]', '[[android_guide_url]]'),
+              ('ios', '[[ios_title]]', '[[ios_emoji]]', '[[ios_download_url]]', '[[ios_guide_url]]'),
+              ('windows', '[[windows_title]]', '[[windows_emoji]]', '[[windows_download_url]]', '[[windows_guide_url]]'),
+              ('macos', '[[macos_title]]', '[[macos_emoji]]', '[[macos_download_url]]', '[[macos_guide_url]]')
+            ] %}
+
+            {% for key, title, emoji, download_url, guide_url in platform_items %}
+            <div class="rounded-3xl border border-white/10 bg-slate-950/50 p-5 transition hover:border-cyan-400/40 hover:bg-slate-900/80">
+              <div class="flex items-center gap-3">
+                <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5 text-2xl">{{ emoji }}</div>
+                <div>
+                  <div class="text-base font-semibold text-white">{{ title }}</div>
+                  <div class="text-xs uppercase tracking-wider text-slate-500">{{ key }}</div>
+                </div>
+              </div>
+              <div class="mt-5 flex flex-col gap-3">
+                {% if download_url %}
+                <a href="{{ download_url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-300 hover:bg-cyan-400/15">Скачать приложение</a>
+                {% endif %}
+                {% if guide_url %}
+                <a href="{{ guide_url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-300 hover:bg-emerald-400/15">Открыть инструкцию</a>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if show_qr_button_enabled %}
+  <div id="qr-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/80 px-4">
+    <div class="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <h3 class="text-lg font-semibold text-white">QR-код подписки</h3>
+        <button id="close-qr-modal" type="button" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">
+          Закрыть
+        </button>
+      </div>
+      <div id="qr-container" class="flex min-h-[280px] items-center justify-center rounded-2xl border border-slate-800 bg-white p-4"></div>
+      <div id="qr-link-preview" class="mt-4 break-all text-xs text-slate-400"></div>
+    </div>
+  </div>
+  {% endif %}
+
+  <script>
+    (function () {
+      const rawPageUrl = document.body.dataset.pageUrl || '';
+      const absoluteCurrentPageUrl = window.location.origin + window.location.pathname;
+      const pageUrl = !rawPageUrl
+        ? absoluteCurrentPageUrl
+        : (rawPageUrl.startsWith('http://') || rawPageUrl.startsWith('https://')
+            ? rawPageUrl
+            : window.location.origin + rawPageUrl);
+      const subscriptionName = document.body.dataset.subscriptionName || '😎 SwoiVPN';
+
+      const primaryLink = document.getElementById('open-subscription-page');
+      const copyButton = document.querySelector('[data-copy-page-url]');
+      const feedback = document.getElementById('copy-feedback');
+      const qrModal = document.getElementById('qr-modal');
+      const qrContainer = document.getElementById('qr-container');
+      const qrPreview = document.getElementById('qr-link-preview');
+      const showQrButton = document.getElementById('show-qr-button');
+      const closeQrButton = document.getElementById('close-qr-modal');
+
+      const openInHiddify = document.getElementById('open-in-hiddify');
+      const openInV2RayTun = document.getElementById('open-in-v2raytun');
+      const openInHapp = document.getElementById('open-in-happ');
+
+      function buildHiddifyLink(link, name) {
+        return `hiddify://import/${encodeURIComponent(link)}#${encodeURIComponent(name || '😎 SwoiVPN')}`;
+      }
+
+      function buildV2RayTunLink(link) {
+        return `v2raytun://import/${encodeURIComponent(link)}`;
+      }
+
+      function buildHappLink(link) {
+        return `happ://add/${link}`;
+      }
+
+      async function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+
+      async function showCopied(text) {
+        try {
+          await copyText(text);
+          if (feedback) {
+            feedback.textContent = '✅ Ссылка на страницу подписки скопирована.';
+            feedback.classList.remove('hidden');
+          }
+        } catch (error) {
+          if (feedback) {
+            feedback.textContent = '❌ Не удалось скопировать ссылку автоматически.';
+            feedback.classList.remove('hidden');
+          }
+        }
+      }
+
+      function openQr(link) {
+        if (!qrModal || !qrContainer || !link) return;
+        qrContainer.innerHTML = '';
+        qrPreview.textContent = link;
+        new QRCode(qrContainer, {
+          text: link,
+          width: 240,
+          height: 240
+        });
+        qrModal.classList.remove('hidden');
+        qrModal.classList.add('flex');
+      }
+
+      function closeQr() {
+        if (!qrModal) return;
+        qrModal.classList.add('hidden');
+        qrModal.classList.remove('flex');
+      }
+
+      if (pageUrl) {
+        if (primaryLink) {
+          primaryLink.href = pageUrl;
+        }
+
+        if (openInHiddify) {
+          openInHiddify.href = buildHiddifyLink(pageUrl, subscriptionName);
+        }
+
+        if (openInV2RayTun) {
+          openInV2RayTun.href = buildV2RayTunLink(pageUrl);
+        }
+
+        if (openInHapp) {
+          openInHapp.href = buildHappLink(pageUrl);
+        }
+      }
+
+      if (copyButton) {
+        copyButton.addEventListener('click', function () {
+          if (pageUrl) showCopied(pageUrl);
+        });
+      }
+
+      if (showQrButton && pageUrl) {
+        showQrButton.addEventListener('click', function () {
+          openQr(pageUrl);
+        });
+      }
+
+      if (closeQrButton) {
+        closeQrButton.addEventListener('click', closeQr);
+      }
+
+      if (qrModal) {
+        qrModal.addEventListener('click', function (event) {
+          if (event.target === qrModal) closeQr();
+        });
+      }
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') closeQr();
+      });
+    })();
+  </script>
+</body>
+</html>

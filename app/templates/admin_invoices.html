@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Счета и платежи{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Счета и платежи</div>
+      <h1 class="mt-4 text-3xl font-bold text-white">Счета и платежи</h1>
+      <p class="mt-2 text-slate-400">Диагностика счетов, статусов провайдера и ручных операций по оплате.</p>
+    </div>
+    <div class="flex gap-3">
+      <a href="/admin/system/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">← На главную</a>
+    </div>
+  </div>
+
+  {% if success_message %}<div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">✅ {{ success_message }}</div>{% endif %}
+  {% if error_message %}<div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">❌ {{ error_message }}</div>{% endif %}
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <form method="get" action="/admin/invoices/" class="grid gap-3 md:grid-cols-3">
+      <div>
+        <label class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Статус</label>
+        <select name="status" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500">
+          {% for value, label in [('all','Все'),('pending','Ожидают оплаты'),('paid','Оплачены'),('applying','Применяются'),('consumed','Применены'),('cancelled','Отменены')] %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="md:col-span-2">
+        <label class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Поиск</label>
+        <input type="text" name="q" value="{{ query or '' }}" placeholder="invoice_id, user_id, provider, external id" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500">
+      </div>
+      <div class="md:col-span-3 flex flex-wrap gap-3">
+        <button type="submit" class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Применить</button>
+        <a href="/admin/invoices/" class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">Сбросить</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">User ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Назначение</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Провайдер</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">External ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">К оплате</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Дата</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Действие</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% for row in rows %}
+          <tr class="hover:bg-slate-800/40">
+            <td class="px-6 py-4 text-sm text-white">#{{ row.id }}</td>
+            <td class="px-6 py-4 text-sm text-slate-300">{{ row.user_id }}</td>
+            <td class="px-6 py-4 text-sm text-slate-300">{{ row.purpose }}</td>
+            <td class="px-6 py-4 text-sm text-slate-300">{{ row.status_label }}</td>
+            <td class="px-6 py-4 text-sm text-slate-300">{{ row.provider }}</td>
+            <td class="px-6 py-4 text-sm text-slate-300 break-all">{{ row.external_invoice_id }}</td>
+            <td class="px-6 py-4 text-sm text-slate-300">{{ row.payable_amount }}</td>
+            <td class="px-6 py-4 text-sm text-slate-300">{{ row.created_at }}</td>
+            <td class="px-6 py-4"><a href="/admin/invoices/{{ row.id }}" class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Открыть</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="px-6 py-8 text-center text-sm text-slate-400">Счета не найдены.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="flex items-center justify-between border-t border-slate-800 px-6 py-5">
+      <div class="text-sm text-slate-400">Страница {{ page }}</div>
+      <div class="flex gap-3">
+        {% if has_prev %}<a href="/admin/invoices/?page={{ page - 1 }}&status={{ status_filter }}{% if query %}&q={{ query | urlencode }}{% endif %}" class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">← Назад</a>{% endif %}
+        {% if has_next_page %}<a href="/admin/invoices/?page={{ page + 1 }}&status={{ status_filter }}{% if query %}&q={{ query | urlencode }}{% endif %}" class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Вперёд →</a>{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

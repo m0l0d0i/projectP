@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Оплата не завершена</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="flex min-h-screen items-center justify-center px-4 py-10">
+    <div class="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-black/30 md:p-10">
+      <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-rose-500/30 bg-rose-500/10 text-3xl">
+        ❌
+      </div>
+
+      <div class="mt-6 text-center">
+        <div class="text-xs uppercase tracking-[0.25em] text-slate-500">SwoiVPN</div>
+        <h1 class="mt-3 text-3xl font-bold text-white md:text-4xl">
+          Оплата не завершена
+        </h1>
+        <p class="mt-4 text-sm leading-6 text-slate-400 md:text-base">
+          Платёж был отменён, прерван или не получил финального подтверждения.
+          Вернитесь в Telegram-бота, чтобы создать новый счёт или повторить оплату.
+        </p>
+      </div>
+
+      <div class="mt-8 grid gap-4 md:grid-cols-3">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Статус</div>
+          <div class="mt-2 text-sm font-semibold text-rose-300">Не завершено</div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Следующий шаг</div>
+          <div class="mt-2 text-sm font-semibold text-white">Вернуться в бота</div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Повтор оплаты</div>
+          <div class="mt-2 text-sm font-semibold text-white">Через Telegram</div>
+        </div>
+      </div>
+
+      <div class="mt-8 rounded-2xl border border-slate-800 bg-slate-950/70 p-5">
+        <h2 class="text-lg font-semibold text-white">Что делать дальше</h2>
+        <div class="mt-4 space-y-3 text-sm leading-6 text-slate-300">
+          <p>• Вернитесь в бота и создайте новый счёт на оплату.</p>
+          <p>• Проверьте, что карта или способ оплаты доступны и операция не была отклонена банком.</p>
+          <p>• Если деньги уже списались, но статус услуги не изменился, напишите в поддержку и приложите подтверждение оплаты.</p>
+        </div>
+      </div>
+
+      <div class="mt-8 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm leading-6 text-amber-200">
+        Если платёжный провайдер уже списал средства, а бот не показал успешную оплату,
+        не оплачивайте повторно несколько раз подряд без проверки статуса.
+      </div>
+
+      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+        {% if bot_username %}
+          <a
+            href="https://t.me/{{ bot_username }}"
+            class="inline-flex w-full items-center justify-center rounded-2xl bg-rose-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-400 sm:w-auto"
+          >
+            Вернуться в бота
+          </a>
+        {% else %}
+          <a
+            href="/"
+            class="inline-flex w-full items-center justify-center rounded-2xl bg-rose-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-400 sm:w-auto"
+          >
+            Перейти дальше
+          </a>
+        {% endif %}
+
+        <button
+          type="button"
+          onclick="window.close()"
+          class="inline-flex w-full items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:border-rose-500 hover:text-white sm:w-auto"
+        >
+          Закрыть страницу
+        </button>
+      </div>
+
+      {% if bot_username %}
+      <div class="mt-6 text-center text-xs text-slate-500">
+        Если кнопка не сработала, откройте вручную:
+        <span class="text-slate-300">@{{ bot_username }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </main>
+</body>
+</html>

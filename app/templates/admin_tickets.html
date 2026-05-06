@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block title %}Тикеты поддержки{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Тикеты поддержки</div>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <h1 class="text-3xl font-bold text-white">Тикеты поддержки</h1>
+        <span class="help-dot" tabindex="0" data-tooltip="Здесь отображается очередь обращений пользователей: кто ждёт ответа поддержки, кто уже получил ответ и какие тикеты закрыты для истории.">?</span>
+      </div>
+      <p class="mt-2 text-slate-400">
+        Очередь обращений пользователей, контроль SLA и быстрый переход к переписке.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Web-admin работает в local-only режиме и должен открываться через SSH-туннель.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/system/"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        title="Вернуться на главную страницу админки"
+      >
+        ← На главную
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  {% set waiting_operator_count = namespace(value=0) %}
+  {% set waiting_user_count = namespace(value=0) %}
+  {% set closed_count = namespace(value=0) %}
+  {% for row in tickets %}
+    {% if row.ticket.status.value == 'waiting_operator' %}
+      {% set waiting_operator_count.value = waiting_operator_count.value + 1 %}
+    {% elif row.ticket.status.value == 'waiting_user' %}
+      {% set waiting_user_count.value = waiting_user_count.value + 1 %}
+    {% elif row.ticket.status.value == 'closed' %}
+      {% set closed_count.value = closed_count.value + 1 %}
+    {% endif %}
+  {% endfor %}
+
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Всего найдено</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Количество тикетов с учётом поиска, фильтра по статусу и текущих параметров страницы.">?</span>
+      </div>
+      <div class="mt-3 text-3xl font-bold text-white">{{ total }}</div>
+      <div class="mt-2 text-sm text-slate-400">С учётом фильтров и поиска.</div>
+    </div>
+
+    <div class="rounded-3xl border border-amber-500/20 bg-amber-500/5 p-6 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-amber-300/80">
+        <span>Ждут оператора</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Тикеты, в которых последнее слово осталось за пользователем и сейчас ответ ожидается от поддержки.">?</span>
+      </div>
+      <div class="mt-3 text-3xl font-bold text-amber-200">{{ waiting_operator_count.value }}</div>
+      <div class="mt-2 text-sm text-amber-100/70">Тикеты, где сейчас ход поддержки.</div>
+    </div>
+
+    <div class="rounded-3xl border border-cyan-500/20 bg-cyan-500/5 p-6 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-cyan-300/80">
+        <span>Ждут пользователя</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Тикеты, в которых поддержка уже ответила и дальнейший ход за пользователем.">?</span>
+      </div>
+      <div class="mt-3 text-3xl font-bold text-cyan-200">{{ waiting_user_count.value }}</div>
+      <div class="mt-2 text-sm text-cyan-100/70">Поддержка уже ответила, ожидается ответ клиента.</div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-700 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Закрыты</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Закрытые тикеты больше не участвуют в очереди, но остаются доступными для аудита и просмотра истории.">?</span>
+      </div>
+      <div class="mt-3 text-3xl font-bold text-slate-100">{{ closed_count.value }}</div>
+      <div class="mt-2 text-sm text-slate-400">Видны для аудита и истории.</div>
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex flex-col gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <h2 class="text-xl font-semibold text-white">Фильтры и поиск</h2>
+        <span class="help-dot" tabindex="0" data-tooltip="Поиск работает по ticket.id, tg_id, username, first_name и last_name. Флаг «Сначала ждут оператора» поднимает в начало очереди тикеты, требующие ответа поддержки.">?</span>
+      </div>
+      <p class="text-sm text-slate-400">
+        Поиск работает по ticket.id, tg_id, username, first_name, last_name. Приоритет можно отдавать тикетам, где очередь за оператором.
+      </p>
+    </div>
+
+    <form method="get" action="/admin/tickets/" class="mt-6 grid gap-4 lg:grid-cols-4">
+      <div class="lg:col-span-2">
+        <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+          <span>Поиск</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Поддерживаются Telegram ID, username, имя пользователя и номер тикета.">?</span>
+        </label>
+        <input
+          type="text"
+          name="q"
+          value="{{ query }}"
+          placeholder="Например: 123456789, username, имя"
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+        >
+      </div>
+
+      <div>
+        <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+          <span>Статус</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Можно отфильтровать только активные тикеты, только закрытые или нужное состояние очереди.">?</span>
+        </label>
+        <select
+          name="status"
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+        >
+          <option value="" {% if not status_filter %}selected{% endif %}>Все статусы</option>
+          {% for option in status_options %}
+          <option value="{{ option.value }}" {% if status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="flex items-end">
+        <label class="flex w-full items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            name="unanswered_first"
+            value="true"
+            {% if unanswered_first %}checked{% endif %}
+            class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-cyan-500"
+          >
+          <span>Сначала ждут оператора</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Полезно для быстрого разбора обращений, где поддержка ещё не ответила пользователю.">?</span>
+        </label>
+      </div>
+
+      <div class="lg:col-span-4 flex flex-wrap gap-3">
+        <button
+          type="submit"
+          class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+          title="Применить поиск и фильтры"
+        >
+          Применить
+        </button>
+
+        <a
+          href="/admin/tickets/"
+          class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          title="Сбросить фильтры и показать все тикеты"
+        >
+          Сбросить
+        </a>
+      </div>
+    </form>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
+    <div class="flex flex-col gap-3 border-b border-slate-800 px-6 py-5 md:flex-row md:items-center md:justify-between">
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-xl font-semibold text-white">Очередь тикетов</h2>
+          <span class="help-dot" tabindex="0" data-tooltip="Здесь собрана вся очередь обращений. Цвет статуса показывает, кому сейчас принадлежит ход: поддержке, пользователю или никому, если тикет закрыт.">?</span>
+        </div>
+        <p class="mt-1 text-sm text-slate-400">
+          Найдено: {{ total }}{% if page_size %} • Страница {{ page }}{% endif %}
+        </p>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Тикет</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Пользователь</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Чей ход</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Открыт</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Последняя активность</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Действие</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% for row in tickets %}
+          <tr class="align-top hover:bg-slate-800/40">
+            <td class="px-6 py-4 text-sm text-white">
+              <div class="font-semibold">#{{ row.ticket.id }}</div>
+              <div class="mt-1 text-xs text-slate-500">
+                Создан: {{ row.ticket.created_at.strftime("%Y-%m-%d %H:%M UTC") if row.ticket.created_at else "Не указано" }}
+              </div>
+              {% if row.ticket.closed_at %}
+              <div class="mt-1 text-xs text-slate-500">
+                Закрыт: {{ row.ticket.closed_at.strftime("%Y-%m-%d %H:%M UTC") }}
+              </div>
+              {% endif %}
+            </td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">
+              <div class="font-medium text-white">user_id={{ row.ticket.user_id }}</div>
+              {% if row.user %}
+              <div class="mt-1 text-xs text-slate-400">
+                TG={{ row.user.tg_id }}{% if row.user.username %} • @{{ row.user.username }}{% endif %}
+              </div>
+              {% if row.user.first_name or row.user.last_name %}
+              <div class="mt-1 text-xs text-slate-500">
+                {{ (row.user.first_name or '') ~ (' ' if row.user.first_name and row.user.last_name else '') ~ (row.user.last_name or '') }}
+              </div>
+              {% else %}
+              <div class="mt-1 text-xs text-slate-500">Имя не заполнено</div>
+              {% endif %}
+              {% else %}
+              <div class="mt-1 text-xs text-slate-500">Пользователь не найден</div>
+              {% endif %}
+            </td>
+
+            <td class="px-6 py-4 text-sm">
+              {% if row.status_tone == 'warning' %}
+                <span class="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300">{{ row.status_label }}</span>
+              {% elif row.status_tone == 'info' %}
+                <span class="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-300">{{ row.status_label }}</span>
+              {% elif row.status_tone == 'success' %}
+                <span class="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">{{ row.status_label }}</span>
+              {% else %}
+                <span class="inline-flex rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-200">{{ row.status_label }}</span>
+              {% endif %}
+            </td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">
+              {% if row.ticket.status.value == 'waiting_operator' %}
+                <span class="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300">Поддержка</span>
+              {% elif row.ticket.status.value == 'waiting_user' %}
+                <span class="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-300">Пользователь</span>
+              {% else %}
+                <span class="inline-flex rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-200">Закрыт</span>
+              {% endif %}
+
+              <div class="mt-2 text-xs text-slate-500">
+                {{ row.last_message_label }}
+              </div>
+            </td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">
+              {% set opened_hours = (row.opened_for_seconds // 3600) %}
+              {% set opened_minutes = ((row.opened_for_seconds % 3600) // 60) %}
+              <div>{{ opened_hours }} ч {{ opened_minutes }} мин</div>
+            </td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">
+              <div>{{ row.last_message_at.strftime("%Y-%m-%d %H:%M UTC") if row.last_message_at else 'Не указано' }}</div>
+              <div class="mt-1 text-xs text-slate-500">{{ row.last_message_label }}</div>
+              {% if row.has_admin_reply %}
+              <div class="mt-2 inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-300">Ответ поддержки есть</div>
+              {% endif %}
+            </td>
+
+            <td class="px-6 py-4">
+              <a
+                href="/admin/tickets/{{ row.ticket.id }}"
+                class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+                title="Открыть карточку тикета и историю переписки"
+              >
+                Открыть
+              </a>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7" class="px-6 py-8 text-center text-sm text-slate-400">
+              {% if query or status_filter %}
+                По заданным фильтрам тикеты не найдены.
+              {% else %}
+                Тикетов пока нет.
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if has_prev or has_next %}
+    <div class="flex items-center justify-between border-t border-slate-800 px-6 py-5">
+      <div class="text-sm text-slate-400">
+        Страница {{ page }}
+      </div>
+
+      <div class="flex gap-3">
+        {% if has_prev %}
+          <a
+            href="/admin/tickets/?page={{ page - 1 }}&q={{ query }}&status={{ status_filter }}{% if unanswered_first %}&unanswered_first=true{% endif %}"
+            class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+            title="Предыдущая страница"
+          >
+            ← Назад
+          </a>
+        {% endif %}
+
+        {% if has_next %}
+          <a
+            href="/admin/tickets/?page={{ page + 1 }}&q={{ query }}&status={{ status_filter }}{% if unanswered_first %}&unanswered_first=true{% endif %}"
+            class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+            title="Следующая страница"
+          >
+            Вперёд →
+          </a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

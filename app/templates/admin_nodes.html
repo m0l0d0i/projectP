@@ -1,0 +1,535 @@
+{% extends "base.html" %}
+
+{% block title %}Реестр узлов{% endblock %}
+
+{% block content %}
+{% set fallback_health_status_options = health_status_options if health_status_options is defined and health_status_options else ['unknown', 'healthy', 'degraded', 'failed', 'disabled'] %}
+{% set fallback_policy_catalog = policy_catalog if policy_catalog is defined and policy_catalog else {} %}
+{% set fallback_sync_state_options = sync_state_options if sync_state_options is defined and sync_state_options else ['never_synced', 'synced', 'missing', 'error'] %}
+{% set fallback_source_status_options = source_status_options if source_status_options is defined and source_status_options else ['unknown', 'active', 'disabled'] %}
+{% set fallback_node_rows = node_rows if node_rows is defined and node_rows else [] %}
+{% set sync_counts = node_sync_counts if node_sync_counts is defined and node_sync_counts else {} %}
+
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Реестр узлов</div>
+      <h1 class="text-3xl font-bold text-white">
+        Реестр узлов
+        <span class="help-dot" tabindex="0" data-tooltip="Здесь хранятся локальные бизнес-настройки узлов и состояние синхронизации с Marzban: source id, source status, sync state и диагностические ошибки.">?</span>
+      </h1>
+      <p class="mt-2 max-w-4xl text-slate-400">
+        Локальный реестр работает вместе с синхронизацией из Marzban: Marzban остаётся источником истины
+        о существовании и внешнем source-статусе узла, а проект хранит локальные бизнес-поля — приоритеты,
+        теги, заметки, default-узел и публичные базовые URL.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Web-admin работает в локальном режиме и должен открываться через SSH-туннель.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <form method="post" action="/admin/nodes/">
+        <input type="hidden" name="action" value="sync_now">
+        <button
+          type="submit"
+          class="inline-flex items-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 hover:border-cyan-400 hover:bg-cyan-500/20 hover:text-white"
+          title="Принудительно синхронизировать реестр узлов с Marzban прямо сейчас"
+        >
+          ⟳ Синхронизировать сейчас
+        </button>
+      </form>
+      <a
+        href="/admin/system/"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        title="Вернуться на главную страницу web-admin"
+      >
+        ← На главную
+      </a>
+      <a
+        href="/admin/marzban-ops/"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        title="Открыть операции Marzban и служебные действия по панели"
+      >
+        Операции Marzban
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+    <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+      ✅ {{ success_message }}
+    </div>
+  {% endif %}
+
+  {% if error_message %}
+    <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+      ❌ {{ error_message }}
+    </div>
+  {% endif %}
+
+  {% if nodes_health %}
+  <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+    <div class="flex items-center justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold text-white">
+          Состояние реестра узлов
+          <span class="help-dot" tabindex="0" data-tooltip="Быстрая сводка показывает, есть ли default-узел, доступны ли обязательные URL и не требуют ли проверки sync-состояния некоторых записей.">?</span>
+        </h2>
+        <p class="mt-1 text-sm text-slate-400">Быстрая проверка default-узлов, URL, health и sync-состояния прямо в интерфейсе.</p>
+      </div>
+      {% if nodes_health.ok %}
+      <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">OK</span>
+      {% else %}
+      <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300">ПРОВЕРИТЬ</span>
+      {% endif %}
+    </div>
+    <div class="mt-3 text-xs uppercase tracking-wide text-slate-500">{{ nodes_health.state }}</div>
+    <div class="mt-3 whitespace-pre-line break-words text-sm text-slate-300">{{ nodes_health.message }}</div>
+  </div>
+  {% endif %}
+
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-sm text-slate-400">Всего узлов <span class="help-dot" tabindex="0" data-tooltip="Все записи локального реестра, включая узлы, которые ещё не синхронизировались или временно отсутствуют в источнике.">?</span></div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ sync_counts.total if sync_counts.total is defined else (nodes|length if nodes is defined else 0) }}</div>
+      <div class="mt-2 text-xs text-slate-500">Все записи локального реестра.</div>
+    </div>
+    <div class="rounded-3xl border border-emerald-500/15 bg-emerald-500/5 p-5 shadow-xl">
+      <div class="text-sm text-emerald-200">Синхронизированы <span class="help-dot" tabindex="0" data-tooltip="Узел найден в Marzban и успешно сопоставлен с локальной записью. Локальные бизнес-поля при этом не затираются.">?</span></div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ sync_counts.synced if sync_counts.synced is defined else 0 }}</div>
+      <div class="mt-2 text-xs text-emerald-100/70">Узлы, успешно синхронизированные с Marzban.</div>
+    </div>
+    <div class="rounded-3xl border border-amber-500/15 bg-amber-500/5 p-5 shadow-xl">
+      <div class="text-sm text-amber-200">Нужна проверка <span class="help-dot" tabindex="0" data-tooltip="Сюда попадают узлы в состояниях missing или error. Они требуют проверки источника, настроек Marzban или локального сопоставления.">?</span></div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ (sync_counts.missing if sync_counts.missing is defined else 0) + (sync_counts.error if sync_counts.error is defined else 0) }}</div>
+      <div class="mt-2 text-xs text-amber-100/70">Missing или error — источник требует внимания.</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-sm text-slate-400">Ещё не синхронизировались <span class="help-dot" tabindex="0" data-tooltip="Локальные записи, которые ещё не проходили подтверждённую синхронизацию с Marzban.">?</span></div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ sync_counts.never_synced if sync_counts.never_synced is defined else 0 }}</div>
+      <div class="mt-2 text-xs text-slate-500">Локальные записи, ещё не проходившие синхронизацию.</div>
+    </div>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+    <section class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div>
+        <h2 class="text-xl font-semibold text-white">
+          Создать / обновить узел
+          <span class="help-dot" tabindex="0" data-tooltip="Если указать уже существующий code, запись будет обновлена. Для новой записи обязательны code и отображаемое имя.">?</span>
+        </h2>
+        <p class="mt-1 text-sm text-slate-400">
+          Если указать уже существующий <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">code</code>,
+          форма обновит существующую запись. Для новой записи обязательно укажите
+          <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">code</code> и
+          <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">display_name</code>.
+        </p>
+        <div class="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-slate-300">
+          <div class="font-medium text-cyan-300">Важно по nullable-полям</div>
+          <p class="mt-2">
+            Пустые значения в <span class="font-medium text-white">API base URL</span> и
+            <span class="font-medium text-white">Subscription base URL</span> реально очищают поле в БД.
+            Старое значение не сохраняется молча.
+          </p>
+        </div>
+        <div class="mt-4 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 px-4 py-3 text-sm text-slate-300">
+          <div class="font-medium text-indigo-200">Что управляется источником, а что локально</div>
+          <ul class="mt-2 space-y-1 text-sm text-slate-300">
+            <li><span class="font-semibold text-white">Из Marzban:</span> существование узла, внешний source id, source status и часть диагностического payload.</li>
+            <li><span class="font-semibold text-white">Локально:</span> display name, priority, weight, tags, default, notes, публичные base URL и ручной health status.</li>
+          </ul>
+        </div>
+      </div>
+
+      <form method="post" action="/admin/nodes/" class="mt-5 space-y-5">
+        <input type="hidden" name="action" value="upsert">
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Код узла <span class="help-dot" tabindex="0" data-tooltip="Внутренний стабильный код узла. Используется для сопоставления и выбора узла в бизнес-логике проекта.">?</span></span>
+            <input
+              name="code"
+              placeholder="ru-bridge-1"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Отображаемое имя <span class="help-dot" tabindex="0" data-tooltip="Человекочитаемое название узла для web-admin и диагностических страниц.">?</span></span>
+            <input
+              name="display_name"
+              placeholder="RU Bridge #1"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </label>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">API base URL <span class="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">nullable</span></span>
+            <input
+              name="api_base_url"
+              placeholder="http://127.0.0.1:8000"
+              title="Полный URL до API узла. Пустое поле полностью очищает значение."
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+            <div class="mt-2 text-xs text-slate-500">Укажите полный http/https URL. Оставьте поле пустым, чтобы удалить текущее значение.</div>
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Subscription base URL <span class="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">nullable</span></span>
+            <input
+              name="subscription_base_url"
+              placeholder="https://panel.example.com"
+              title="Публичный базовый URL для подписок узла. Пустое поле полностью очищает значение."
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+            <div class="mt-2 text-xs text-slate-500">Укажите полный URL. Если очистить поле, узел больше не будет считаться узлом с заданным subscription base URL.</div>
+          </label>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-3">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Код локации <span class="help-dot" tabindex="0" data-tooltip="Короткий код региона или площадки, например ru-mow, de-fra, nl-ams. Используется в policy и routing preview.">?</span></span>
+            <input
+              name="location_code"
+              placeholder="ru-mow"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Провайдер <span class="help-dot" tabindex="0" data-tooltip="Провайдер или хостинг площадки. Нужен для диагностики и группировки узлов.">?</span></span>
+            <input
+              name="provider_name"
+              placeholder="Hetzner"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Подсказка по транспорту <span class="help-dot" tabindex="0" data-tooltip="Короткая пометка по типу транспорта или профилю узла: reality, xhttp, bridge и т.п.">?</span></span>
+            <input
+              name="transport_hint"
+              placeholder="reality / xhttp / bridge"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </label>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Policy tags <span class="help-dot" tabindex="0" data-tooltip="Список тегов через запятую. Эти теги затем используются в routing profiles и node policy для фильтрации и предпочтений.">?</span></span>
+            <input
+              name="policy_tags_text"
+              placeholder="ai-clean, ru-bridge, mobile-stable"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+            <div class="mt-2 text-xs text-slate-500">
+              {% if fallback_policy_catalog %}
+                Доступные теги:
+                {% for key, label in fallback_policy_catalog.items() %}
+                  <span class="mr-2 inline-flex rounded-full border border-slate-700 px-2 py-0.5 text-slate-400">{{ key }} — {{ label }}</span>
+                {% endfor %}
+              {% else %}
+                Можно указывать теги через запятую. Каталог тегов сейчас не передан backend-ом.
+              {% endif %}
+            </div>
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Capabilities JSON <span class="help-dot" tabindex="0" data-tooltip="Дополнительные диагностические или routing-возможности узла в JSON-формате. Используйте только валидный JSON-объект.">?</span></span>
+            <textarea
+              name="capabilities_json_text"
+              rows="5"
+              placeholder='{"reality": true, "self_sni": false}'
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            ></textarea>
+          </label>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-4">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Приоритет <span class="help-dot" tabindex="0" data-tooltip="Чем меньше число, тем выше приоритет узла в локальной бизнес-логике выбора.">?</span></span>
+            <input
+              type="number"
+              name="priority"
+              value="100"
+              min="0"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            >
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Вес <span class="help-dot" tabindex="0" data-tooltip="Относительный вес узла для balancing и мягких сценариев выбора. Больше значение — выше шанс выбора при прочих равных.">?</span></span>
+            <input
+              type="number"
+              name="weight"
+              value="100"
+              min="0"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            >
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Порядок сортировки <span class="help-dot" tabindex="0" data-tooltip="Используется для порядка вывода в интерфейсе. Не влияет напрямую на routing, если это не заложено отдельно.">?</span></span>
+            <input
+              type="number"
+              name="sort_order"
+              value="100"
+              min="0"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            >
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Статус здоровья <span class="help-dot" tabindex="0" data-tooltip="Локальный административный health-статус узла. Его можно использовать как ручной override поверх автоматических проверок.">?</span></span>
+            <select
+              name="health_status"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            >
+              {% for status in fallback_health_status_options %}
+                <option value="{{ status }}" {% if status == 'unknown' %}selected{% endif %}>{{ status }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+            <input type="checkbox" name="is_enabled" value="1" checked class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+            <span>Узел активен</span>
+          </label>
+
+          <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+            <input type="checkbox" name="is_default" value="1" class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+            <span>Сделать узлом по умолчанию</span>
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="mb-2 block text-sm font-medium text-slate-300">Заметки <span class="help-dot" tabindex="0" data-tooltip="Операционные комментарии по узлу. Эти заметки не синхронизируются из Marzban и не затираются sync-процессом.">?</span></span>
+          <textarea
+            name="notes"
+            rows="4"
+            placeholder="Операционные заметки по узлу"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          ></textarea>
+        </label>
+
+        <div class="flex flex-wrap gap-3">
+          <button
+            type="submit"
+            class="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+            title="Создать новый узел или обновить существующий по его code"
+          >
+            Сохранить узел
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <section class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div>
+        <h2 class="text-xl font-semibold text-white">
+          Памятка по синхронизации и policy routing
+          <span class="help-dot" tabindex="0" data-tooltip="Этот блок напоминает, как трактовать sync-состояние узлов и какие policy tags полезны для routing profiles и preview выбора узла.">?</span>
+        </h2>
+        <p class="mt-1 text-sm text-slate-400">
+          Здесь мы описываем узлы и policy tags, а source-состояние синхронизируем из Marzban без включения случайной multi-node маршрутизации в боевом потоке.
+        </p>
+      </div>
+
+      <div class="mt-5 space-y-3">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-sm font-semibold text-white">Как читать sync-статусы</div>
+          <ul class="mt-3 space-y-2 text-sm text-slate-300">
+            <li><span class="font-semibold text-emerald-300">synced</span> — узел найден в Marzban и успешно сопоставлен с локальной записью.</li>
+            <li><span class="font-semibold text-amber-300">missing</span> — локальная запись есть, но узел больше не пришёл из источника.</li>
+            <li><span class="font-semibold text-rose-300">error</span> — синхронизация завершилась ошибкой и требует проверки.</li>
+            <li><span class="font-semibold text-slate-300">never_synced</span> — локальная запись ещё ни разу не была подтверждена из Marzban.</li>
+          </ul>
+        </div>
+
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-sm font-semibold text-white">Рекомендуемые policy tags</div>
+          <ul class="mt-3 space-y-2 text-sm text-slate-300">
+            <li><span class="font-semibold text-cyan-300">ai-clean</span> — foundation под чистые egress-маршруты для AI-сервисов.</li>
+            <li><span class="font-semibold text-cyan-300">ru-bridge</span> — foundation под bridge-профили и обходные сценарии.</li>
+            <li><span class="font-semibold text-cyan-300">mobile-stable</span> — консервативные профили под мобильных клиентов.</li>
+            <li><span class="font-semibold text-cyan-300">low-risk-reality</span> — осторожные reality-профили без случайной маршрутизации.</li>
+          </ul>
+        </div>
+
+        <div class="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-slate-300">
+          Не включайте здесь WARP как основу маршрутизации и не используйте случайную multi-node маршрутизацию для SelfSNI на этом этапе.
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
+    <div class="flex flex-col gap-3 border-b border-slate-800 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h2 class="text-xl font-semibold text-white">
+          Список узлов
+          <span class="help-dot" tabindex="0" data-tooltip="Таблица показывает локальные настройки узлов, sync/source-состояние, health и быстрые административные действия.">?</span>
+        </h2>
+        <p class="mt-1 text-sm text-slate-400">Локальные настройки, sync-состояние, source-статусы и быстрые действия.</p>
+      </div>
+      <div class="flex flex-wrap gap-2 text-xs text-slate-400">
+        {% for state in fallback_sync_state_options %}
+          <span class="inline-flex rounded-full border border-slate-700 px-2 py-1">sync: {{ state }}</span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Узел</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Синхронизация / источник</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Policy</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Health</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Приоритет</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Ссылки</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Действия</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% if fallback_node_rows %}
+            {% for row in fallback_node_rows %}
+              {% set source = row.node if row.node is defined else row %}
+              <tr class="align-top hover:bg-slate-800/40">
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  <div class="font-semibold text-white">{{ row.display_name if row.display_name is defined else source.display_name }}</div>
+                  <div class="mt-1 text-xs text-slate-500">code: {{ row.code if row.code is defined else source.code }}</div>
+                  {% if row.location_provider_transport is defined %}
+                    <div class="mt-2 text-xs text-slate-500">{{ row.location_provider_transport }}</div>
+                  {% elif source.location_code or source.provider_name or source.transport_hint %}
+                    <div class="mt-2 text-xs text-slate-500">{{ source.location_code or 'Не задано' }} • {{ source.provider_name or 'Не задано' }} • {{ source.transport_hint or 'Не задано' }}</div>
+                  {% endif %}
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    {% if (row.is_enabled if row.is_enabled is defined else source.is_enabled) %}
+                      <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">активен</span>
+                    {% else %}
+                      <span class="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300">выключен</span>
+                    {% endif %}
+                    {% if (row.is_default if row.is_default is defined else source.is_default) %}
+                      <span class="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-300">по умолчанию</span>
+                    {% endif %}
+                  </div>
+                </td>
+
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  <div class="flex flex-wrap gap-2">
+                    <span class="rounded-full border px-2 py-1 text-xs font-semibold {{ row.sync_state_tone if row.sync_state_tone is defined else 'border-slate-700 bg-slate-950 text-slate-300' }}">{{ row.sync_state_label if row.sync_state_label is defined else (source.sync_state.value if source.sync_state and source.sync_state.value is defined else (source.sync_state or 'unknown')) }}</span>
+                    <span class="rounded-full border px-2 py-1 text-xs font-semibold {{ row.source_status_tone if row.source_status_tone is defined else 'border-slate-700 bg-slate-950 text-slate-300' }}">{{ row.source_status_label if row.source_status_label is defined else (source.source_status.value if source.source_status and source.source_status.value is defined else (source.source_status or 'unknown')) }}</span>
+                  </div>
+                  <div class="mt-2 text-xs text-slate-500">source id: {{ row.source_node_id if row.source_node_id is defined else (source.source_node_id or 'Не задан') }}</div>
+                  <div class="mt-1 text-xs text-slate-500">последний sync: {{ row.last_sync_at if row.last_sync_at is defined else (source.last_sync_at or 'Не зафиксирован') }}</div>
+                  {% if (row.sync_error if row.sync_error is defined else source.sync_error) %}
+                    <div class="mt-2 break-words rounded-xl border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-xs text-rose-200">{{ row.sync_error if row.sync_error is defined else source.sync_error }}</div>
+                  {% endif %}
+                </td>
+
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  {% if (row.policy_tags if row.policy_tags is defined else source.policy_tags) %}
+                    <div class="flex flex-wrap gap-2">
+                      {% for tag in (row.policy_tags if row.policy_tags is defined else source.policy_tags) %}
+                        <span class="rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300">{{ tag }}</span>
+                      {% endfor %}
+                    </div>
+                  {% else %}
+                    <span class="text-slate-500">Не заданы</span>
+                  {% endif %}
+                  {% if (row.capabilities_pretty_json if row.capabilities_pretty_json is defined else source.capabilities_json) %}
+                    <pre class="mt-3 whitespace-pre-wrap break-words rounded-2xl border border-slate-800 bg-slate-950 p-3 text-xs text-slate-400">{{ row.capabilities_pretty_json if row.capabilities_pretty_json is defined else source.capabilities_json }}</pre>
+                  {% endif %}
+                </td>
+
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  <div class="font-medium text-white">{{ row.health_status_label if row.health_status_label is defined else (source.health_status.value if source.health_status and source.health_status.value is defined else source.health_status) }}</div>
+                  <div class="mt-1 text-xs text-slate-500">{{ row.last_healthcheck_at if row.last_healthcheck_at is defined else (source.last_healthcheck_at or 'Не проверялся') }}</div>
+                  <div class="mt-2 text-xs break-words text-slate-500">{{ row.last_health_error if row.last_health_error is defined else (source.last_health_error or 'Ошибки не зафиксированы') }}</div>
+                </td>
+
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  <div>priority: {{ row.priority if row.priority is defined else source.priority }}</div>
+                  <div class="mt-1">weight: {{ row.weight if row.weight is defined else source.weight }}</div>
+                  <div class="mt-1">sort: {{ row.sort_order if row.sort_order is defined else source.sort_order }}</div>
+                </td>
+
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  <div class="break-all">API: {{ row.api_base_url if row.api_base_url is defined else (source.api_base_url or 'Не задан') }}</div>
+                  <div class="mt-2 break-all">SUB: {{ row.subscription_base_url if row.subscription_base_url is defined else (source.subscription_base_url or 'Не задан') }}</div>
+                </td>
+
+                <td class="px-6 py-4">
+                  <div class="flex min-w-[220px] flex-col gap-3">
+                    <form method="post" action="/admin/nodes/" class="space-y-2">
+                      <input type="hidden" name="action" value="set_default">
+                      <input type="hidden" name="node_id" value="{{ row.id if row.id is defined else source.id }}">
+                      <button
+                        type="submit"
+                        class="inline-flex w-full items-center justify-center rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+                        title="Сделать этот узел основным узлом по умолчанию"
+                      >
+                        Сделать основным
+                      </button>
+                    </form>
+
+                    <form method="post" action="/admin/nodes/" class="space-y-2">
+                      <input type="hidden" name="action" value="set_health">
+                      <input type="hidden" name="node_id" value="{{ row.id if row.id is defined else source.id }}">
+                      <select
+                        name="health_status"
+                        class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+                        title="Выберите новый локальный health-статус для узла"
+                      >
+                        {% for status in fallback_health_status_options %}
+                          {% set current_health = row.health_status_value if row.health_status_value is defined else (source.health_status.value if source.health_status and source.health_status.value is defined else source.health_status) %}
+                          <option value="{{ status }}" {% if current_health == status %}selected{% endif %}>{{ status }}</option>
+                        {% endfor %}
+                      </select>
+                      <button
+                        type="submit"
+                        class="inline-flex w-full items-center justify-center rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+                        title="Обновить локальный health-статус узла"
+                      >
+                        Обновить health
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          {% elif nodes %}
+            {% for node in nodes %}
+              <tr class="align-top hover:bg-slate-800/40">
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  <div class="font-semibold text-white">{{ node.display_name }}</div>
+                  <div class="mt-1 text-xs text-slate-500">code: {{ node.code }}</div>
+                  {% if node.location_code or node.provider_name or node.transport_hint %}
+                    <div class="mt-2 text-xs text-slate-500">{{ node.location_code or 'Не задано' }} • {{ node.provider_name or 'Не задано' }} • {{ node.transport_hint or 'Не задано' }}</div>
+                  {% endif %}
+                </td>
+                <td class="px-6 py-4 text-sm text-slate-400" colspan="5">Для полного отображения sync-статусов нужен обновлённый backend `routes.py`.</td>
+                <td class="px-6 py-4"></td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="7" class="px-6 py-8 text-center text-sm text-slate-400">
+                Узлы пока не добавлены.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

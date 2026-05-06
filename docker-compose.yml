@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres-backup:
+    image: prodrigestivill/postgres-backup-local:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: 14
+      BACKUP_KEEP_WEEKS: 0
+      BACKUP_KEEP_MONTHS: 0
+      HEALTHCHECK_PORT: 8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - postgres_backups:/backups
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  bot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      WEB_CONCURRENCY: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 800m
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    stop_grace_period: 60s
+    volumes:
+      - bot_logs:/app/logs
+      - bot_media:/app/data/media
+      - /var/lib/marzban/assets:/var/lib/marzban/assets
+      - /var/lib/marzban/templates:/var/lib/marzban/templates
+    command: >
+      sh -ec "alembic upgrade head && exec python -m app.main"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${APP_PORT:-8080}/readyz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:${APP_PORT:-8080}"
+      - "127.0.0.1:${WEB_ADMIN_PORT:-8001}:${WEB_ADMIN_PORT:-8001}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  postgres_data:
+  postgres_backups:
+  redis_data:
+  bot_logs:
+  bot_media:

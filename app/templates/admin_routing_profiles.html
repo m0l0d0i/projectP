@@ -1,0 +1,577 @@
+{% extends "base.html" %}
+
+{% block title %}Профили маршрутизации{% endblock %}
+
+{% macro tone_badge(tone, text) -%}
+  {% set palette = {
+    'emerald': 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    'rose': 'border-rose-500/30 bg-rose-500/10 text-rose-300',
+    'amber': 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+    'cyan': 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300',
+    'slate': 'border-slate-700 bg-slate-900 text-slate-300',
+  } %}
+  <span class="rounded-full border px-2.5 py-1 text-xs font-semibold {{ palette.get(tone, palette['slate']) }}">{{ text }}</span>
+{%- endmacro %}
+
+{% block content %}
+{% set rows = profile_rows if profile_rows is defined and profile_rows else profiles %}
+{% set form = edit_form if edit_form is defined and edit_form else {
+  'profile_id': None,
+  'code': '',
+  'title': '',
+  'description': '',
+  'sort_order': 100,
+  'match_tags_text': '',
+  'config_json_text': '{}',
+  'notes': '',
+  'is_enabled': True,
+  'is_default': False,
+} %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="help-inline">
+        <h1 class="text-3xl font-bold text-white">Профили маршрутизации</h1>
+        <span class="help-dot" data-tooltip="Профиль маршрутизации определяет, какой узел будет выбран в runtime, какие фильтры применятся и какой Xray-фрагмент будет сформирован в dry-run preview.">?</span>
+      </div>
+      <p class="mt-2 text-slate-400">
+        Управление runtime-профилями выбора узла и dry-run preview Xray fragment. Здесь видно, какой профиль будет выбран,
+        какой запрос к policy получится, какой узел сработает в предварительном расчёте и какой фрагмент Xray-конфига будет собран.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Эта страница не применяет конфигурацию напрямую. Она помогает безопасно проверить логику до отдельного apply-flow:
+        validate → backup → atomic replace → restart → rollback.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/system/"
+        title="Вернуться на главную страницу веб-админки"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+      >
+        ← На главную
+      </a>
+      <a
+        href="/admin/nodes/"
+        title="Перейти к списку узлов и их sync/source-состоянию"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+      >
+        Узлы
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+    <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+      ✅ {{ success_message }}
+    </div>
+  {% endif %}
+
+  {% if error_message %}
+    <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+      ❌ {{ error_message }}
+    </div>
+  {% endif %}
+
+  <div class="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-5 shadow-2xl shadow-black/20">
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div>
+        <div class="help-inline">
+          <h2 class="text-lg font-semibold text-amber-200">Важно: применение routing/Xray приведёт к рестарту Xray</h2>
+          <span class="help-dot" data-tooltip="Этот warning нужен, чтобы администратор заранее понимал последствия apply-операции. Сам dry-run ничего не перезапускает, но реальное применение изменённого Xray-конфига потребует рестарта сервиса.">?</span>
+        </div>
+        <p class="mt-1 text-sm text-amber-100/90">
+          {{ xray_restart_notice or 'Применение routing/Xray-конфигурации приведёт к перезапуску Xray. Перед apply убедитесь, что администратор и активные пользователи готовы к кратковременному рестарту.' }}
+        </p>
+      </div>
+      <div class="rounded-2xl border border-amber-500/30 bg-slate-950/60 px-4 py-3 text-xs leading-6 text-amber-100/80">
+        <div>1. Проверить dry-run preview</div>
+        <div>2. Подтвердить окно обслуживания</div>
+        <div>3. Только потом выполнять apply</div>
+      </div>
+    </div>
+  </div>
+
+  {% if routing_profiles_health %}
+  <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+    <div class="flex items-center justify-between gap-3">
+      <div>
+        <div class="help-inline">
+          <h2 class="text-lg font-semibold text-white">Состояние routing-профилей</h2>
+          <span class="help-dot" data-tooltip="Показывает базовую диагностику слоя routing profiles: наличие default-профиля, enabled-профилей и корректность общей runtime-формы конфигурации.">?</span>
+        </div>
+        <p class="mt-1 text-sm text-slate-400">Проверка default profile, enabled profiles и базовой формы runtime-конфигурации.</p>
+      </div>
+      {% if routing_profiles_health.ok %}
+        {{ tone_badge('emerald', 'OK') }}
+      {% else %}
+        {{ tone_badge('amber', 'Проверить') }}
+      {% endif %}
+    </div>
+    <div class="mt-3 text-xs uppercase tracking-wide text-slate-500">{{ routing_profiles_health.state }}</div>
+    <div class="mt-3 whitespace-pre-line break-words text-sm text-slate-300">{{ routing_profiles_health.message }}</div>
+  </div>
+  {% endif %}
+
+  <div class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+    <section class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div class="help-inline">
+            <h2 class="text-xl font-semibold text-white">
+              {% if form.profile_id %}Редактирование профиля маршрутизации{% else %}Создание профиля маршрутизации{% endif %}
+            </h2>
+            <span class="help-dot" data-tooltip="Здесь настраивается профиль, который затем участвует в выборе узла и генерации dry-run preview. JSON-конфиг должен быть валидным объектом.">?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">
+            Профиль задаёт runtime-политику выбора узла, обязательные и предпочтительные фильтры, а также preview Xray fragment.
+          </p>
+        </div>
+        {% if form.profile_id %}
+          <a
+            href="/admin/routing-profiles/"
+            title="Сбросить режим редактирования и открыть чистую форму"
+            class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          >
+            Сбросить режим редактирования
+          </a>
+        {% endif %}
+      </div>
+
+      <form method="post" action="/admin/routing-profiles/" class="mt-6 space-y-5">
+        <input type="hidden" name="action" value="upsert" />
+        {% if form.profile_id %}
+          <input type="hidden" name="profile_id" value="{{ form.profile_id }}" />
+        {% endif %}
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">
+              <span class="help-inline">Код профиля <span class="text-slate-500">*</span><span class="help-dot" data-tooltip="Стабильный технический код профиля. Лучше не менять его после создания, потому что на него могут ссылаться другие части проекта.">?</span></span>
+            </span>
+            <input
+              type="text"
+              name="code"
+              value="{{ form.code }}"
+              {% if form.profile_id %}readonly{% endif %}
+              required
+              placeholder="mobile_stable"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 {% if form.profile_id %}cursor-not-allowed text-slate-400{% endif %}"
+            />
+            <p class="mt-2 text-xs text-slate-500">Стабильный технический код профиля. После создания менять его нежелательно.</p>
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">
+              <span class="help-inline">Название <span class="text-slate-500">*</span><span class="help-dot" data-tooltip="Человеко-читаемое название профиля, которое будет видно в админке и preview.">?</span></span>
+            </span>
+            <input
+              type="text"
+              name="title"
+              value="{{ form.title }}"
+              required
+              placeholder="Mobile Stable"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            />
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="mb-2 block text-sm font-medium text-slate-300">
+            <span class="help-inline">Описание<span class="help-dot" data-tooltip="Краткое описание профиля: для каких сценариев он нужен, какие пользователи или подписки должны через него проходить.">?</span></span>
+          </span>
+          <textarea
+            name="description"
+            rows="3"
+            placeholder="Краткое описание профиля маршрутизации"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >{{ form.description }}</textarea>
+        </label>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">
+              <span class="help-inline">Порядок сортировки<span class="help-dot" data-tooltip="Чем меньше число, тем выше приоритет профиля в списках и fallback-логике, если она учитывает sort_order.">?</span></span>
+            </span>
+            <input
+              type="number"
+              name="sort_order"
+              value="{{ form.sort_order }}"
+              min="0"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            />
+          </label>
+
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">
+              <span class="help-inline">Теги совпадения<span class="help-dot" data-tooltip="CSV-список тегов, по которым этот профиль подбирается для подписки. Например: mobile, stable, ru.">?</span></span>
+            </span>
+            <input
+              type="text"
+              name="match_tags_text"
+              value="{{ form.match_tags_text }}"
+              placeholder="mobile, stable, low-risk"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            />
+            <p class="mt-2 text-xs text-slate-500">CSV-список тегов, по которым профиль подбирается для подписки.</p>
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="mb-2 block text-sm font-medium text-slate-300">
+            <span class="help-inline">Runtime JSON-конфиг<span class="help-dot" data-tooltip="Главное поле профиля. Здесь задаются стратегия выбора узла, required/preferred/avoid tags, требования к synced source и Xray fragment preview.">?</span></span>
+          </span>
+          <textarea
+            name="config_json_text"
+            rows="14"
+            placeholder='{"strategy": "prefer_healthy", "required_tags": ["mobile", "stable"], "xray_outbound_tag": "mobile-stable"}'
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >{{ form.config_json_text }}</textarea>
+          <p class="mt-2 text-xs leading-6 text-slate-500">
+            Поддерживаются runtime-поля вроде <span class="text-slate-300">strategy</span>, <span class="text-slate-300">required_tags</span>,
+            <span class="text-slate-300">preferred_tags</span>, <span class="text-slate-300">avoid_tags</span>,
+            <span class="text-slate-300">require_synced_source</span>, <span class="text-slate-300">allow_missing_source</span>,
+            <span class="text-slate-300">premium_only</span>, <span class="text-slate-300">reserve_only</span>,
+            <span class="text-slate-300">xray_outbound_tag</span>, <span class="text-slate-300">xray_balancer_tag</span>,
+            <span class="text-slate-300">xray_fragment</span>.
+          </p>
+        </label>
+
+        <label class="block">
+          <span class="mb-2 block text-sm font-medium text-slate-300">
+            <span class="help-inline">Внутренние заметки<span class="help-dot" data-tooltip="Служебные комментарии для администратора: зачем создан профиль, когда его применять и на что обратить внимание при dry-run и apply.">?</span></span>
+          </span>
+          <textarea
+            name="notes"
+            rows="3"
+            placeholder="Внутренние заметки для профиля маршрутизации"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >{{ form.notes }}</textarea>
+        </label>
+
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+            <input type="checkbox" name="is_enabled" value="1" {% if form.is_enabled %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+            <span class="help-inline">Профиль активен<span class="help-dot" data-tooltip="Неактивный профиль остаётся в базе и списке, но не должен использоваться в обычном runtime-выборе.">?</span></span>
+          </label>
+
+          <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+            <input type="checkbox" name="is_default" value="1" {% if form.is_default %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+            <span class="help-inline">Сделать профилем по умолчанию<span class="help-dot" data-tooltip="Профиль по умолчанию используется как fallback, если для подписки не подобрался более специфичный routing profile.">?</span></span>
+          </label>
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+          <button
+            type="submit"
+            title="Сохранить профиль маршрутизации"
+            class="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+          >
+            {% if form.profile_id %}Сохранить изменения{% else %}Создать профиль{% endif %}
+          </button>
+
+          {% if form.profile_id %}
+            <button
+              type="submit"
+              name="action"
+              value="preview"
+              title="Сохранить профиль и сразу обновить dry-run preview"
+              class="inline-flex items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/20"
+            >
+              Обновить dry-run preview
+            </button>
+          {% endif %}
+        </div>
+      </form>
+    </section>
+
+    <section class="space-y-6">
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div>
+          <div class="help-inline">
+            <h2 class="text-xl font-semibold text-white">Подсказки по runtime-маршрутизации</h2>
+            <span class="help-dot" data-tooltip="Этот блок помогает быстрее собрать валидный профиль: код, match tags и пример JSON-конфига для dry-run preview.">?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">
+            Dry-run позволяет увидеть runtime-решение заранее: конфиг профиля, запрос к policy, выбранный узел и итоговый Xray fragment.
+          </p>
+        </div>
+
+        <div class="mt-5 space-y-4 text-sm text-slate-300">
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="font-semibold text-white">Примеры кодов профиля</div>
+            <div class="mt-2 text-slate-400">ai_clean, ru_bridge, mobile_stable, low_risk_reality</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="font-semibold text-white">Примеры тегов совпадения</div>
+            <div class="mt-2 text-slate-400">mobile, stable, ru, reality, safe, ai</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="font-semibold text-white">Пример runtime JSON</div>
+            <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-xl bg-slate-900 p-3 text-xs text-slate-300">{
+  "strategy": "prefer_healthy",
+  "required_tags": ["mobile", "stable"],
+  "preferred_tags": ["premium"],
+  "require_synced_source": true,
+  "xray_outbound_tag": "mobile-stable",
+  "xray_fragment": {
+    "routing": {
+      "domainStrategy": "AsIs"
+    }
+  }
+}</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="help-inline">
+              <h2 class="text-xl font-semibold text-white">Dry-run preview</h2>
+              <span class="help-dot" data-tooltip="Показывает, как профиль будет работать в runtime: какие теги поданы, какой запрос к node policy собран, какой узел выбран и какой Xray-фрагмент будет получен до apply.">?</span>
+            </div>
+            <p class="mt-1 text-sm text-slate-400">
+              Показывает, как профиль будет работать в runtime и какой Xray fragment получится до apply.
+            </p>
+          </div>
+          {% if routing_preview and routing_preview.profile_code %}
+            {{ tone_badge('cyan', routing_preview.profile_code) }}
+          {% endif %}
+        </div>
+
+        {% if routing_preview %}
+          <form method="get" action="/admin/routing-profiles/" class="mt-5 space-y-4">
+            {% if routing_preview.profile_id %}
+              <input type="hidden" name="preview_profile_id" value="{{ routing_preview.profile_id }}" />
+              <input type="hidden" name="edit_id" value="{{ routing_preview.profile_id }}" />
+            {% endif %}
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-slate-300">
+                <span class="help-inline">Теги для preview<span class="help-dot" data-tooltip="CSV-список тегов, который будет использован только в dry-run preview. Это не изменяет профиль и не пишет ничего в runtime.">?</span></span>
+              </span>
+              <input
+                type="text"
+                name="preview_tags"
+                value="{{ preview_tags }}"
+                placeholder="mobile, stable"
+                class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+              />
+            </label>
+            <button type="submit" title="Пересчитать dry-run preview для текущих тегов" class="inline-flex items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/20">
+              Пересчитать preview
+            </button>
+          </form>
+
+          {% if routing_preview.error %}
+            <div class="mt-5 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+              ❌ {{ routing_preview.error }}
+            </div>
+          {% endif %}
+
+          <div class="mt-5 grid gap-3 md:grid-cols-2">
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Профиль</div>
+              <div class="mt-2 text-sm text-white">{{ routing_preview.profile_title or 'Не указан' }}</div>
+              <div class="mt-1 text-xs text-slate-500">{{ routing_preview.profile_code or 'Не указан' }}</div>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Запрошенные теги</div>
+              <div class="mt-2 text-sm text-white">
+                {% if routing_preview.requested_tags %}
+                  {{ routing_preview.requested_tags | join(', ') }}
+                {% else %}
+                  Не заданы
+                {% endif %}
+              </div>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Выбранный узел</div>
+              <div class="mt-2 text-sm text-white">{{ routing_preview.selected_node_code or 'Не выбран' }}</div>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Нужен рестарт Xray</div>
+              <div class="mt-2 text-sm text-white">{{ 'Да' if routing_preview.restart_required else 'Нет' }}</div>
+            </div>
+          </div>
+
+          {% if routing_preview.selection_reason %}
+            <div class="mt-4 rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Причина выбора</div>
+              <div class="mt-2 whitespace-pre-wrap break-words text-sm text-slate-300">{{ routing_preview.selection_reason }}</div>
+            </div>
+          {% endif %}
+
+          {% if routing_preview.restart_required %}
+            <div class="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+              ⚠️ {{ routing_preview.restart_warning or xray_restart_notice }}
+            </div>
+          {% endif %}
+
+          <div class="mt-5 space-y-4">
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Runtime config JSON</div>
+              <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-slate-300">{{ routing_preview.runtime_config_json or '{}' }}</pre>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Node request JSON</div>
+              <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-slate-300">{{ routing_preview.node_request_json or '{}' }}</pre>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Selection explain JSON</div>
+              <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-slate-300">{{ routing_preview.selection_json or '{}' }}</pre>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Xray fragment JSON</div>
+              <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-slate-300">{{ routing_preview.xray_fragment_json or '{}' }}</pre>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Xray apply preview JSON</div>
+              <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-slate-300">{{ routing_preview.xray_apply_preview_json or '{}' }}</pre>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-2">
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Команда валидации</div>
+              <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-slate-300">{{ routing_preview.validation_command | join(' ') if routing_preview.validation_command else 'Не задана' }}</pre>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Команда рестарта</div>
+              <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-slate-300">{{ routing_preview.restart_command | join(' ') if routing_preview.restart_command else 'Не задана' }}</pre>
+            </div>
+          </div>
+        {% else %}
+          <div class="mt-5 rounded-2xl border border-dashed border-slate-700 bg-slate-950/40 px-4 py-8 text-center text-sm text-slate-400">
+            Сохраните профиль маршрутизации и откройте preview, чтобы увидеть dry-run выбора узла и Xray fragment.
+          </div>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <section class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+      <div>
+        <div class="help-inline">
+          <h2 class="text-xl font-semibold text-white">Текущие профили маршрутизации</h2>
+          <span class="help-dot" data-tooltip="Список всех профилей маршрутизации: их статусы, match tags, runtime-сводка и наличие Xray-fragment override.">?</span>
+        </div>
+        <p class="mt-1 text-sm text-slate-400">
+          Список профилей маршрутизации, их статусов, тегов совпадения и runtime-сводки.
+        </p>
+      </div>
+    </div>
+
+    {% if rows %}
+      <div class="mt-5 overflow-hidden rounded-2xl border border-slate-800">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-slate-800 text-sm">
+            <thead class="bg-slate-950/80">
+              <tr class="text-left text-slate-400">
+                <th class="px-4 py-3 font-medium">Профиль</th>
+                <th class="px-4 py-3 font-medium">Runtime</th>
+                <th class="px-4 py-3 font-medium">Теги совпадения</th>
+                <th class="px-4 py-3 font-medium">Xray</th>
+                <th class="px-4 py-3 font-medium">Действия</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800 bg-slate-950/30">
+              {% for row in rows %}
+                {% set raw = row.profile if row.profile is defined else None %}
+                {% set profile_id = row.id if row.id is defined else (raw.id if raw else None) %}
+                {% set code = row.code if row.code is defined else (raw.code if raw else 'Не задан') %}
+                {% set title = row.title if row.title is defined else (raw.title if raw else 'Не задан') %}
+                {% set description = row.description if row.description is defined else (raw.description if raw else '') %}
+                {% set is_default = row.is_default if row.is_default is defined else (raw.is_default if raw else False) %}
+                {% set is_enabled = row.is_enabled if row.is_enabled is defined else (raw.is_enabled if raw else False) %}
+                {% set strategy = row.runtime_strategy if row.runtime_strategy is defined else 'prefer_healthy' %}
+                {% set match_tags = row.match_tags if row.match_tags is defined else ((raw.match_tags if raw else []) or []) %}
+                {% set required_tags = row.required_tags if row.required_tags is defined else [] %}
+                {% set preferred_tags = row.preferred_tags if row.preferred_tags is defined else [] %}
+                {% set has_xray_fragment = row.has_xray_fragment if row.has_xray_fragment is defined else False %}
+                <tr>
+                  <td class="px-4 py-4 align-top">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <div class="font-semibold text-white">{{ title }}</div>
+                      {{ tone_badge('slate', code) }}
+                      {% if is_default %}
+                        {{ tone_badge('cyan', 'по умолчанию') }}
+                      {% endif %}
+                      {% if is_enabled %}
+                        {{ tone_badge('emerald', 'активен') }}
+                      {% else %}
+                        {{ tone_badge('rose', 'отключён') }}
+                      {% endif %}
+                    </div>
+                    {% if description %}
+                      <div class="mt-2 max-w-xl text-sm leading-6 text-slate-400">{{ description }}</div>
+                    {% else %}
+                      <div class="mt-2 max-w-xl text-sm leading-6 text-slate-500">Описание не задано.</div>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-4 align-top text-slate-300">
+                    <div>Стратегия: <span class="text-white">{{ strategy }}</span></div>
+                    {% if required_tags %}
+                      <div class="mt-1 text-xs text-slate-400">Обязательные: {{ required_tags | join(', ') }}</div>
+                    {% endif %}
+                    {% if preferred_tags %}
+                      <div class="mt-1 text-xs text-slate-500">Предпочтительные: {{ preferred_tags | join(', ') }}</div>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-4 align-top text-slate-300">
+                    {% if match_tags %}
+                      {{ match_tags | join(', ') }}
+                    {% else %}
+                      <span class="text-slate-500">Не заданы</span>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-4 align-top text-slate-300">
+                    {% if has_xray_fragment %}
+                      {{ tone_badge('amber', 'фрагмент настроен') }}
+                    {% else %}
+                      <span class="text-slate-500">Override-фрагмент не задан</span>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-4 align-top">
+                    <div class="flex flex-wrap gap-2">
+                      <a
+                        href="/admin/routing-profiles/?edit_id={{ profile_id }}&preview_profile_id={{ profile_id }}&preview_tags={{ (match_tags | join(', ')) | urlencode }}"
+                        title="Открыть профиль в режиме редактирования и сразу показать dry-run preview"
+                        class="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20"
+                      >
+                        Редактировать + preview
+                      </a>
+
+                      <form method="post" action="/admin/routing-profiles/">
+                        <input type="hidden" name="action" value="set_default" />
+                        <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+                        <button type="submit" title="Сделать этот профиль профилем маршрутизации по умолчанию" class="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">
+                          Сделать по умолчанию
+                        </button>
+                      </form>
+
+                      <form method="post" action="/admin/routing-profiles/" onsubmit="return confirm('Удалить профиль маршрутизации {{ code }}?');">
+                        <input type="hidden" name="action" value="delete" />
+                        <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+                        <button type="submit" title="Удалить профиль маршрутизации. Удаление default-профиля блокируется на уровне backend-логики." class="inline-flex items-center justify-center rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/20">
+                          Удалить
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="mt-5 rounded-2xl border border-dashed border-slate-700 bg-slate-950/40 px-4 py-8 text-center text-sm text-slate-400">
+        Профили маршрутизации пока не созданы.
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

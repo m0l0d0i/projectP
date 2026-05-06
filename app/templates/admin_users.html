@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}Пользователи{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Пользователи</div>
+      <div class="mt-4 flex items-center gap-2">
+        <h1 class="text-3xl font-bold text-white">Пользователи</h1>
+        <span
+          class="help-dot"
+          tabindex="0"
+          data-tooltip="Здесь можно найти пользователя по Telegram ID, username, имени, фамилии или service_id, а затем открыть его полную карточку."
+        >?</span>
+      </div>
+      <p class="mt-2 text-slate-400">
+        Отдельный список пользователей с поиском, пагинацией и быстрым переходом в карточку пользователя.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Web-admin работает в local-only режиме и должен открываться через SSH-туннель.
+      </p>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <h2 class="text-lg font-semibold text-white">Поиск пользователей</h2>
+          <span
+            class="help-dot"
+            tabindex="0"
+            data-tooltip="Поиск работает по Telegram ID, username, имени, фамилии и внутреннему service_id. Можно вставить как точное значение, так и часть строки."
+          >?</span>
+        </div>
+        <p class="mt-1 text-sm text-slate-400">
+          Поиск по Telegram ID, username, имени, фамилии или service_id.
+        </p>
+      </div>
+    </div>
+
+    <form method="get" action="/admin/users/" class="mt-4 flex flex-col gap-3 md:flex-row">
+      <input
+        type="text"
+        name="q"
+        value="{{ query if query is defined else '' }}"
+        placeholder="Например: 317450547, username, service_id"
+        class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+      >
+      <button
+        type="submit"
+        class="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+      >
+        Найти
+      </button>
+      {% if query %}
+      <a
+        href="/admin/users/"
+        class="inline-flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+      >
+        Сбросить
+      </a>
+      {% endif %}
+    </form>
+
+    <div class="mt-4 flex flex-wrap gap-3 text-xs">
+      <a
+        href="/admin/export/users.csv"
+        class="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-300 hover:border-cyan-500 hover:text-white"
+        title="Экспортирует текущий список пользователей в CSV-файл."
+      >
+        ⬇️ Экспорт пользователей (CSV)
+      </a>
+    </div>
+  </div>
+
+  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="flex items-center gap-2 text-sm text-slate-400">
+        <span>Найдено пользователей</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Количество записей, найденных по текущему запросу и фильтрам.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ total or 0 }}</div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="flex items-center gap-2 text-sm text-slate-400">
+        <span>Текущая страница</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Номер текущей страницы в списке пользователей.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ page or 1 }}</div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="flex items-center gap-2 text-sm text-slate-400">
+        <span>Размер страницы</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Сколько пользователей показывается на одной странице списка.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ page_size or 20 }}</div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="flex items-center gap-2 text-sm text-slate-400">
+        <span>Режим списка</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Показывает, работаете ли вы с полным списком пользователей или с результатами поиска.">?</span>
+      </div>
+      <div class="mt-2 text-lg font-semibold text-white">
+        {% if query %}Результаты поиска{% else %}Общий список{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
+    <div class="flex items-center justify-between gap-4 border-b border-slate-800 px-6 py-5">
+      <div>
+        <div class="flex items-center gap-2">
+          <h2 class="text-xl font-semibold text-white">Список пользователей</h2>
+          <span
+            class="help-dot"
+            tabindex="0"
+            data-tooltip="Нажмите «Открыть», чтобы перейти в карточку пользователя: баланс, подписка, платежи, тикеты и другие действия админа доступны уже там."
+          >?</span>
+        </div>
+        <p class="mt-1 text-sm text-slate-400">
+          Нажмите «Открыть», чтобы перейти в карточку пользователя.
+        </p>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Telegram ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Пользователь</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Баланс</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Создан</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Действие</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% if users %}
+            {% for user in users %}
+            <tr class="hover:bg-slate-800/40">
+              <td class="px-6 py-4 text-sm text-white">{{ user.id }}</td>
+              <td class="px-6 py-4 text-sm text-slate-300">{{ user.tg_id }}</td>
+              <td class="px-6 py-4 text-sm text-slate-300">
+                <div class="font-medium text-white">
+                  {% if user.username %}
+                    @{{ user.username }}
+                  {% else %}
+                    Не задан
+                  {% endif %}
+                </div>
+                <div class="mt-1 text-xs text-slate-500">
+                  {% set full_name = ((user.first_name or '') ~ ' ' ~ (user.last_name or '')).strip() %}
+                  {{ full_name or 'Имя не заполнено' }}
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-slate-300">{{ user.balance }}</td>
+              <td class="px-6 py-4 text-sm text-slate-300">{{ user.created_at or "Не указано" }}</td>
+              <td class="px-6 py-4">
+                <a
+                  href="/admin/users/{{ user.id }}"
+                  class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+                  title="Открыть полную карточку пользователя"
+                >
+                  Открыть
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="6" class="px-6 py-8 text-center text-sm text-slate-400">
+                {% if query %}
+                  По этому запросу пользователи не найдены.
+                {% else %}
+                  Список пользователей пуст.
+                {% endif %}
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if has_prev or has_next %}
+    <div class="flex items-center justify-between border-t border-slate-800 px-6 py-5">
+      <div class="text-sm text-slate-400">
+        Страница {{ page }}
+      </div>
+
+      <div class="flex gap-3">
+        {% if has_prev %}
+        <a
+          href="/admin/users/?page={{ page - 1 }}{% if query %}&q={{ query | urlencode }}{% endif %}"
+          class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        >
+          ← Назад
+        </a>
+        {% endif %}
+
+        {% if has_next %}
+        <a
+          href="/admin/users/?page={{ page + 1 }}{% if query %}&q={{ query | urlencode }}{% endif %}"
+          class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+        >
+          Вперёд →
+        </a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

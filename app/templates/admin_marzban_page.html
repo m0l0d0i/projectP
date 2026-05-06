@@ -1,0 +1,552 @@
+{% extends "base.html" %}
+
+{% block title %}Настройки страницы подписки Marzban{% endblock %}
+
+{% set page_help = "Управление live-страницей подписки Marzban: preview, allowlisted env-настройки, backup, apply и rollback." %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <div class="flex flex-wrap items-center gap-3 text-sm">
+        <a href="/admin/system/" class="text-cyan-300 hover:text-cyan-200">← Система</a>
+        <span class="text-slate-600">•</span>
+        <a href="/admin/marzban-ops/" class="text-cyan-300 hover:text-cyan-200">Операции Marzban</a>
+      </div>
+
+      <h1 class="mt-4 text-3xl font-bold tracking-tight text-white">Страница подписки Marzban <span class="help-dot" tabindex="0" data-tooltip="Здесь настраивается публичная страница подписки /sub/&lt;token&gt;, preview, allowlisted env и live apply.">?</span></h1>
+      <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
+        Управление публичной страницей подписки <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">/sub/&lt;token&gt;</code>.
+        Здесь настраиваются тексты, platform-блоки, preview и live apply. Прямого raw-редактора
+        <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">.env</code> здесь нет.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Web-admin работает в local-only режиме и должен открываться через SSH-туннель.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/system/"
+        class="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800"
+      >
+        Система
+      </a>
+      <a
+        href="/admin/marzban-ops/"
+        class="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800"
+      >
+        Операции Marzban
+      </a>
+      <a
+        href="{{ preview_iframe_url or '/admin/marzban-page/preview' }}"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="inline-flex items-center justify-center rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+      >
+        Открыть preview
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="rounded-3xl border border-amber-400/20 bg-amber-400/10 p-5 shadow-2xl shadow-black/10">
+    <div class="flex items-start gap-3">
+      <div class="mt-0.5 text-amber-300">⚠️</div>
+      <div>
+        <div class="text-sm font-semibold text-amber-200">Live apply изменяет реальную страницу Marzban <span class="help-dot" tabindex="0" data-tooltip="Кнопка apply пишет итоговый HTML в live deploy target, создаёт backup и при ошибке делает rollback.">?</span></div>
+        <div class="mt-2 space-y-2 text-sm leading-6 text-slate-300">
+          <p>Кнопка «Сохранить и применить в Marzban» пишет итоговый HTML в live deploy target, делает backup и при ошибке пытается выполнить rollback.</p>
+          <p>Если для apply настроена restart-команда Marzban/Xray, изменение может повлиять на live-отдачу страницы подписки. Перед apply проверьте preview, пути и итоговый diff.</p>
+          <p>Управляемые env-ключи меняются только по allowlist. Неизвестные ключи и raw-редактирование <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">.env</code> здесь недоступны.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-cyan-400/20 bg-cyan-400/5 p-5 shadow-2xl shadow-black/10">
+    <div class="flex items-start gap-3">
+      <div class="mt-0.5 text-cyan-300">ℹ️</div>
+      <div>
+        <div class="text-sm font-semibold text-cyan-200">Важно по пустым полям <span class="help-dot" tabindex="0" data-tooltip="Необязательные текстовые поля можно очищать полностью: пустое значение сохраняется как NULL, без скрытого возврата старого текста.">?</span></div>
+        <div class="mt-2 space-y-2 text-sm leading-6 text-slate-300">
+          <p>Необязательные текстовые поля этой страницы можно очищать полностью: пустое значение сохраняется как <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">NULL</code>, а старый текст не подставляется молча.</p>
+          <p>Это относится к полям «Подсказка к подключению», «Текст блока поддержки» и «Подзаголовок блока платформ».</p>
+          <p>Для allowlisted env-ключей действует отдельный apply-flow: значения сначала проходят preview/валидацию и только потом пишутся в файл.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid gap-4 xl:grid-cols-3">
+    {% set _template_ok = template_paths_state.source_exists if template_paths_state and template_paths_state.source_exists is defined else false %}
+    {% set _deploy_ok = template_paths_state.deployed_writable if template_paths_state and template_paths_state.deployed_writable is defined else false %}
+    {% set _env_ok = managed_env_path_state.exists if managed_env_path_state and managed_env_path_state.exists is defined else false %}
+
+    <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Шаблон-источник <span class="help-dot" tabindex="0" data-tooltip="Исходный Jinja-шаблон, из которого строятся preview и live HTML.">?</span></h2>
+          <p class="mt-1 text-sm text-slate-400">Шаблон-источник, из которого строится preview и live HTML.</p>
+        </div>
+        <span class="rounded-full px-2 py-1 text-xs font-semibold {% if _template_ok %}border border-emerald-500/30 bg-emerald-500/10 text-emerald-300{% else %}border border-rose-500/30 bg-rose-500/10 text-rose-300{% endif %}">
+          {{ 'OK' if _template_ok else 'ПРОВЕРИТЬ' }}
+        </span>
+      </div>
+      <dl class="mt-4 space-y-2 text-sm">
+        <div>
+          <dt class="text-slate-500">Путь</dt>
+          <dd class="mt-1 break-all text-slate-200">{{ template_paths_state.source_template_path if template_paths_state else 'Не определён' }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Состояние</dt>
+          <dd class="mt-1 text-slate-200">{{ 'Файл найден' if _template_ok else 'Файл не найден или недоступен' }}</dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Live deploy target <span class="help-dot" tabindex="0" data-tooltip="Файл, в который записывается итоговый live HTML при применении изменений.">?</span></h2>
+          <p class="mt-1 text-sm text-slate-400">Итоговый live HTML, в который пишется apply.</p>
+        </div>
+        <span class="rounded-full px-2 py-1 text-xs font-semibold {% if _deploy_ok %}border border-emerald-500/30 bg-emerald-500/10 text-emerald-300{% else %}border border-amber-500/30 bg-amber-500/10 text-amber-300{% endif %}">
+          {{ 'ГОТОВ' if _deploy_ok else 'НУЖНА ПРОВЕРКА' }}
+        </span>
+      </div>
+      <dl class="mt-4 space-y-2 text-sm">
+        <div>
+          <dt class="text-slate-500">Путь</dt>
+          <dd class="mt-1 break-all text-slate-200">{{ template_paths_state.deployed_template_path if template_paths_state else 'Не определён' }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Состояние</dt>
+          <dd class="mt-1 text-slate-200">{{ 'Можно писать' if _deploy_ok else 'Путь не готов для записи' }}</dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Управляемый env <span class="help-dot" tabindex="0" data-tooltip="Только allowlisted env-ключи. Это не raw-редактор .env и не место для произвольных переменных.">?</span></h2>
+          <p class="mt-1 text-sm text-slate-400">Allowlisted env-ключи и путь к целевому .env.</p>
+        </div>
+        <span class="rounded-full px-2 py-1 text-xs font-semibold {% if _env_ok %}border border-emerald-500/30 bg-emerald-500/10 text-emerald-300{% else %}border border-amber-500/30 bg-amber-500/10 text-amber-300{% endif %}">
+          {{ 'OK' if _env_ok else 'ПРОВЕРИТЬ' }}
+        </span>
+      </div>
+      <dl class="mt-4 space-y-2 text-sm">
+        <div>
+          <dt class="text-slate-500">Путь</dt>
+          <dd class="mt-1 break-all text-slate-200">{{ managed_env_path_state.path if managed_env_path_state else 'Не определён' }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Состояние</dt>
+          <dd class="mt-1 text-slate-200">{{ 'Файл найден' if _env_ok else 'Файл отсутствует или ещё не создан' }}</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  {% if preview_health or managed_env_health or live_apply_health %}
+  <div class="grid gap-4 xl:grid-cols-3">
+    {% if preview_health %}
+    <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Preview / рендер <span class="help-dot" tabindex="0" data-tooltip="Проверка, что шаблон корректно рендерится с текущими настройками и доступными platform links.">?</span></h2>
+          <p class="mt-1 text-sm text-slate-400">Проверка рендера шаблона и preview-контекста.</p>
+        </div>
+        <span class="rounded-full px-2 py-1 text-xs font-semibold {% if preview_health.ok %}border border-emerald-500/30 bg-emerald-500/10 text-emerald-300{% else %}border border-rose-500/30 bg-rose-500/10 text-rose-300{% endif %}">
+          {{ 'OK' if preview_health.ok else 'FAIL' }}
+        </span>
+      </div>
+      <div class="mt-3 text-xs uppercase tracking-wide text-slate-500">{{ preview_health.state }}</div>
+      <div class="mt-3 whitespace-pre-line break-words text-sm text-slate-300">{{ preview_health.message }}</div>
+    </div>
+    {% endif %}
+
+    {% if managed_env_health %}
+    <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Управляемый env <span class="help-dot" tabindex="0" data-tooltip="Только allowlisted env-ключи. Это не raw-редактор .env и не место для произвольных переменных.">?</span></h2>
+          <p class="mt-1 text-sm text-slate-400">Проверка allowlist, пути .env и доступности записи.</p>
+        </div>
+        <span class="rounded-full px-2 py-1 text-xs font-semibold {% if managed_env_health.ok %}border border-emerald-500/30 bg-emerald-500/10 text-emerald-300{% else %}border border-amber-500/30 bg-amber-500/10 text-amber-300{% endif %}">
+          {{ 'OK' if managed_env_health.ok else 'ПРОВЕРИТЬ' }}
+        </span>
+      </div>
+      <div class="mt-3 text-xs uppercase tracking-wide text-slate-500">{{ managed_env_health.state }}</div>
+      <div class="mt-3 whitespace-pre-line break-words text-sm text-slate-300">{{ managed_env_health.message }}</div>
+    </div>
+    {% endif %}
+
+    {% if live_apply_health %}
+    <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Live apply <span class="help-dot" tabindex="0" data-tooltip="Проверка готовности пути, backup/apply/rollback и, при наличии команды, возможного рестарта сервиса.">?</span></h2>
+          <p class="mt-1 text-sm text-slate-400">Проверка готовности backup/apply/rollback flow.</p>
+        </div>
+        <span class="rounded-full px-2 py-1 text-xs font-semibold {% if live_apply_health.ok %}border border-emerald-500/30 bg-emerald-500/10 text-emerald-300{% else %}border border-amber-500/30 bg-amber-500/10 text-amber-300{% endif %}">
+          {{ 'ГОТОВ' if live_apply_health.ok else 'ПРОВЕРИТЬ' }}
+        </span>
+      </div>
+      <div class="mt-3 text-xs uppercase tracking-wide text-slate-500">{{ live_apply_health.state }}</div>
+      <div class="mt-3 whitespace-pre-line break-words text-sm text-slate-300">{{ live_apply_health.message }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+    <section class="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
+      <div class="mb-6">
+        <h2 class="text-xl font-semibold text-white">Настройки страницы <span class="help-dot" tabindex="0" data-tooltip="Основные тексты и видимость блоков на странице подписки. Эти значения участвуют в preview и live apply.">?</span></h2>
+        <p class="mt-2 text-sm text-slate-400">
+          Изменения используются при preview-рендере и при live apply в deploy target Marzban.
+        </p>
+      </div>
+
+      <form method="post" action="/admin/marzban-page/" class="space-y-8">
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Название бренда <span class="help-dot" tabindex="0" data-tooltip="Короткое название сервиса, которое отображается в заголовке и навигационных частях страницы.">?</span></span>
+            <input name="brand_name" value="{{ settings_row.brand_name }}" required class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400" />
+          </label>
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Заголовок страницы <span class="help-dot" tabindex="0" data-tooltip="HTML title и общее название страницы в браузере и preview.">?</span></span>
+            <input name="page_title" value="{{ settings_row.page_title }}" required class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400" />
+          </label>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Главный заголовок <span class="help-dot" tabindex="0" data-tooltip="Основной headline на публичной странице подписки.">?</span></span>
+            <input name="hero_title" value="{{ settings_row.hero_title }}" required class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400" />
+          </label>
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Текст кнопки подключения <span class="help-dot" tabindex="0" data-tooltip="Подпись на основной CTA-кнопке подключения.">?</span></span>
+            <input name="connect_button_text" value="{{ settings_row.connect_button_text }}" required class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400" />
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="mb-2 block text-sm font-medium text-slate-300">Главный текст <span class="help-dot" tabindex="0" data-tooltip="Основной поясняющий текст в hero-блоке страницы.">?</span></span>
+          <textarea name="hero_text" rows="4" required class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400">{{ settings_row.hero_text }}</textarea>
+        </label>
+
+        <label class="block">
+          <div class="mb-2 flex items-center gap-2">
+            <span class="block text-sm font-medium text-slate-300">Подсказка к подключению <span class="help-dot" tabindex="0" data-tooltip="Необязательный блок с короткими инструкциями или замечаниями по подключению.">?</span></span>
+            <span class="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[11px] font-medium text-cyan-200">nullable</span>
+          </div>
+          <textarea name="connect_hint_text" rows="3" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400" placeholder="Оставьте пустым, чтобы полностью убрать этот блок-подсказку">{{ settings_row.connect_hint_text or '' }}</textarea>
+          <p class="mt-2 text-xs leading-5 text-slate-500">Необязательное поле. Пустое значение очищает текст в БД и убирает подсказку из итоговой страницы.</p>
+        </label>
+
+        <label class="block">
+          <div class="mb-2 flex items-center gap-2">
+            <span class="block text-sm font-medium text-slate-300">Текст блока поддержки <span class="help-dot" tabindex="0" data-tooltip="Дополнительный текст рядом с поддержкой. Можно очистить полностью.">?</span></span>
+            <span class="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[11px] font-medium text-cyan-200">nullable</span>
+          </div>
+          <textarea name="support_text" rows="3" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400" placeholder="Оставьте пустым, чтобы скрыть дополнительный текст блока поддержки">{{ settings_row.support_text or '' }}</textarea>
+          <p class="mt-2 text-xs leading-5 text-slate-500">Необязательное поле. Если очистить его полностью, старое значение не сохранится скрыто и не будет подставлено повторно.</p>
+        </label>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Заголовок блока платформ <span class="help-dot" tabindex="0" data-tooltip="Заголовок секции со ссылками или карточками клиентов/платформ.">?</span></span>
+            <input name="platforms_title" value="{{ settings_row.platforms_title }}" required class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400" />
+          </label>
+          <label class="block">
+            <div class="mb-2 flex items-center gap-2">
+              <span class="block text-sm font-medium text-slate-300">Подзаголовок блока платформ <span class="help-dot" tabindex="0" data-tooltip="Необязательное пояснение под заголовком блока платформ.">?</span></span>
+              <span class="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[11px] font-medium text-cyan-200">nullable</span>
+            </div>
+            <input name="platforms_subtitle" value="{{ settings_row.platforms_subtitle or '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400" placeholder="Оставьте пустым, чтобы убрать подзаголовок" />
+            <p class="mt-2 text-xs leading-5 text-slate-500">Пустое значение очищает поле в БД и полностью убирает подзаголовок из preview и live-рендера.</p>
+          </label>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-300">Видимость блоков и кнопок <span class="help-dot" tabindex="0" data-tooltip="Эти переключатели управляют видимостью основных CTA, one-click кнопок приложений, QR и platform-блока на публичной странице подписки.">?</span></h3>
+            <p class="mt-1 text-xs leading-5 text-slate-500">Изменения участвуют и в preview, и в live apply. После сохранения они должны отражаться на странице подписки без ручной правки live HTML.</p>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+              <input type="checkbox" name="show_usage_block" value="1" {% if settings_row.show_usage_block %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+              <span>Показывать блок использования <span class="help-dot" tabindex="0" data-tooltip="Если включено, пользователь увидит блок с данными по использованию подписки.">?</span></span>
+            </label>
+
+            <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+              <input type="checkbox" name="show_primary_connect_button" value="1" {% if settings_row.show_primary_connect_button %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+              <span>Показывать основную кнопку подключения <span class="help-dot" tabindex="0" data-tooltip="Показывает главную CTA-кнопку, ведущую на ссылку подписки.">?</span></span>
+            </label>
+
+            <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+              <input type="checkbox" name="show_subscription_copy_button" value="1" {% if settings_row.show_subscription_copy_button %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+              <span>Показывать кнопку копирования <span class="help-dot" tabindex="0" data-tooltip="Позволяет быстро скопировать ссылку или данные подписки с публичной страницы.">?</span></span>
+            </label>
+
+            <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+              <input type="checkbox" name="show_one_click_block" value="1" {% if settings_row.show_one_click_block %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+              <span>Показывать блок «Подключить в 1 клик» <span class="help-dot" tabindex="0" data-tooltip="Показывает отдельный блок с deep link-кнопками приложений.">?</span></span>
+            </label>
+
+            <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+              <input type="checkbox" name="show_qr_button" value="1" {% if settings_row.show_qr_button %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+              <span>Показывать QR-кнопку и QR-модалку <span class="help-dot" tabindex="0" data-tooltip="Включает кнопку показа QR и все QR-действия на странице подписки.">?</span></span>
+            </label>
+
+            <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+              <input type="checkbox" name="show_platform_cards" value="1" {% if settings_row.show_platform_cards %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+              <span>Показывать карточки платформ <span class="help-dot" tabindex="0" data-tooltip="Показывает карточки платформ вместо более компактного представления ссылок.">?</span></span>
+            </label>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+            <div class="mb-3 text-xs uppercase tracking-wide text-slate-500">One-click приложения</div>
+            <div class="grid gap-3 md:grid-cols-3">
+              <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+                <input type="checkbox" name="show_hiddify_button" value="1" {% if settings_row.show_hiddify_button %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+                <span>Кнопка Hiddify <span class="help-dot" tabindex="0" data-tooltip="Deep link-кнопка для открытия ссылки подписки в Hiddify.">?</span></span>
+              </label>
+
+              <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+                <input type="checkbox" name="show_v2raytun_button" value="1" {% if settings_row.show_v2raytun_button %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+                <span>Кнопка v2RayTun <span class="help-dot" tabindex="0" data-tooltip="Deep link-кнопка для открытия ссылки подписки в v2RayTun.">?</span></span>
+              </label>
+
+              <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+                <input type="checkbox" name="show_happ_button" value="1" {% if settings_row.show_happ_button %}checked{% endif %} class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+                <span>Кнопка Happ <span class="help-dot" tabindex="0" data-tooltip="Deep link-кнопка для открытия ссылки подписки в Happ.">?</span></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 border-t border-white/10 pt-2">
+          <button type="submit" class="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400">
+            Сохранить настройки
+          </button>
+          <a href="{{ preview_iframe_url or '/admin/marzban-page/preview' }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-900">
+            Preview в новой вкладке
+          </a>
+        </div>
+      </form>
+
+      <div class="mt-8 border-t border-white/10 pt-8">
+        <div class="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-semibold text-white">Управляемые Marzban/Xray env-настройки <span class="help-dot" tabindex="0" data-tooltip="Редактируются только allowlisted ключи, влияющие на страницу подписки и связанные безопасные параметры.">?</span></h2>
+            <p class="mt-2 text-sm leading-6 text-slate-400">
+              Здесь доступны только allowlisted env-ключи. Это не raw редактор
+              <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">.env</code>: можно менять только заранее разрешённые параметры, а readonly-ключи отображаются без возможности редактирования.
+            </p>
+          </div>
+        </div>
+
+        {% if managed_env_preview and managed_env_preview.items %}
+        <div class="mb-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-4">
+          <div class="text-sm font-semibold text-cyan-200">Preview изменений managed env <span class="help-dot" tabindex="0" data-tooltip="Показывает, какие allowlisted ключи действительно изменятся после применения.">?</span></div>
+          <div class="mt-2 text-sm text-slate-300">Перед применением проверьте, какие allowlisted ключи действительно изменятся.</div>
+          <div class="mt-4 space-y-3">
+            {% for item in managed_env_preview.items %}
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-3 text-sm">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="font-medium text-white">{{ item.key }}</div>
+                <span class="rounded-full border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-300">
+                  {{ item.change_type or 'change' }}
+                </span>
+              </div>
+              <div class="mt-2 grid gap-2 md:grid-cols-2">
+                <div>
+                  <div class="text-xs uppercase tracking-wide text-slate-500">Текущее</div>
+                  <div class="mt-1 break-all rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-slate-300">{{ item.old_value if item.old_value is not none else 'Не задано' }}</div>
+                </div>
+                <div>
+                  <div class="text-xs uppercase tracking-wide text-slate-500">Новое</div>
+                  <div class="mt-1 break-all rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-slate-100">{{ item.new_value if item.new_value is not none else 'Очистить / удалить' }}</div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+        {% if managed_env_items %}
+        <form method="post" action="{{ managed_env_form_action or '/admin/marzban-page/env/' }}" class="space-y-5">
+          <div class="grid gap-4">
+            {% for item in managed_env_items %}
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <div class="text-sm font-semibold text-white">{{ item.key }}</div>
+                  {% if item.readonly %}
+                  <span class="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-xs font-medium text-amber-300">только чтение</span>
+                  {% else %}
+                  <span class="inline-flex items-center rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 text-xs font-medium text-cyan-300">управляемый</span>
+                  {% endif %}
+                </div>
+                <div class="text-xs text-slate-500">{{ 'значение задано' if item.present else 'значение не задано' }}</div>
+              </div>
+
+              <label class="block">
+                <span class="mb-2 block text-xs uppercase tracking-wide text-slate-500">Значение <span class="help-dot" tabindex="0" data-tooltip="Пустое значение очищает allowlisted ключ через явный apply-flow. Для readonly-полей значение только отображается.">?</span></span>
+                <input type="text" name="{{ (managed_env_field_prefix or 'env__') ~ item.key }}" value="{{ item.value or '' }}" {% if item.readonly %}readonly{% endif %} class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400 {% if item.readonly %}cursor-not-allowed opacity-70{% endif %}" placeholder="{% if item.readonly %}Ключ только для чтения{% else %}Введите значение{% endif %}" />
+              </label>
+              <p class="mt-2 text-xs leading-5 text-slate-500">
+                {% if item.readonly %}
+                Поле отображается только для контроля. Из web-admin оно не изменяется.
+                {% else %}
+                Пустое значение очищает allowlisted ключ только через явный apply-flow. Тихого сохранения старого значения больше нет.
+                {% endif %}
+              </p>
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <button type="submit" class="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400">
+              Сохранить env-настройки
+            </button>
+            <div class="text-sm text-slate-500">
+              Сохраняются только allowlisted ключи. Перед записью будет создан backup, а изменения пройдут через preview/apply-логику.
+            </div>
+          </div>
+        </form>
+        {% else %}
+        <div class="rounded-2xl border border-dashed border-slate-700 bg-slate-950/40 px-4 py-5 text-sm text-slate-400">
+          Allowlisted env-ключи не настроены. Заполните их через конфигурацию приложения, чтобы этот раздел стал активным.
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="space-y-6">
+      <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
+        <div class="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-semibold text-white">Preview <span class="help-dot" tabindex="0" data-tooltip="Быстрый просмотр итоговой страницы подписки с текущими настройками до live apply.">?</span></h2>
+            <p class="mt-2 text-sm text-slate-400">Быстрый просмотр итоговой страницы подписки с текущими настройками и platform links.</p>
+          </div>
+          <a href="{{ preview_iframe_url or '/admin/marzban-page/preview' }}" target="_blank" rel="noopener noreferrer" class="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800">
+            Открыть отдельно
+          </a>
+        </div>
+
+        <div class="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Бренд</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ settings_row.brand_name }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Блок использования</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_usage_block else 'ВЫКЛ' }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Основная кнопка подключения</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_primary_connect_button else 'ВЫКЛ' }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Кнопка копирования</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_subscription_copy_button else 'ВЫКЛ' }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">One-click блок</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_one_click_block else 'ВЫКЛ' }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">QR-кнопка</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_qr_button else 'ВЫКЛ' }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Карточки платформ</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_platform_cards else 'ВЫКЛ' }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Hiddify</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_hiddify_button else 'ВЫКЛ' }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">v2RayTun</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_v2raytun_button else 'ВЫКЛ' }}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Happ</div>
+            <div class="mt-1 text-sm font-medium text-slate-100">{{ 'ВКЛ' if settings_row.show_happ_button else 'ВЫКЛ' }}</div>
+          </div>
+        </div>
+
+        <div class="overflow-hidden rounded-3xl border border-slate-800 bg-white">
+          <iframe src="{{ preview_iframe_url or '/admin/marzban-page/preview' }}" title="Предпросмотр страницы Marzban" class="h-[920px] w-full bg-white" loading="lazy" referrerpolicy="no-referrer"></iframe>
+        </div>
+      </div>
+
+      <div class="rounded-3xl border border-amber-400/20 bg-amber-400/10 p-6 shadow-2xl shadow-black/20">
+        <div class="flex items-start gap-3">
+          <div class="mt-0.5 text-amber-300">🚀</div>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-xl font-semibold text-white">Сохранить и применить в Marzban <span class="help-dot" tabindex="0" data-tooltip="Применяет изменения к live-странице: backup, атомарная запись, опциональный restart и rollback при ошибке.">?</span></h2>
+            <p class="mt-2 text-sm leading-6 text-slate-300">
+              Эта операция рендерит live HTML, создаёт backup текущего deploy target, записывает новый файл атомарно и при неудаче пытается выполнить rollback.
+            </p>
+            <div class="mt-4 rounded-2xl border border-amber-400/20 bg-slate-950/50 p-4 text-sm text-amber-100">
+              <div class="font-semibold text-amber-200">Перед применением <span class="help-dot" tabindex="0" data-tooltip="Проверьте preview, состояние путей и убедитесь, что понимаете влияние на live-страницу и возможный restart.">?</span></div>
+              <ul class="mt-2 space-y-1 text-slate-300">
+                <li>• Убедитесь, что preview соответствует ожидаемому результату.</li>
+                <li>• Проверьте source template и deploy target выше.</li>
+                <li>• Если настроена restart-команда, apply повлияет на live-сервис Marzban/Xray.</li>
+              </ul>
+            </div>
+
+            <form method="post" action="{{ page_apply_form_action or '/admin/marzban-page/apply/' }}" class="mt-5 space-y-4">
+              <label class="flex items-start gap-3 rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-200">
+                <input type="checkbox" name="confirm_apply" value="1" required class="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400 focus:ring-cyan-400" />
+                <span>Подтверждаю, что preview проверен и я понимаю, что изменения будут применены к live-странице Marzban с backup и возможным restart.</span>
+              </label>
+
+              <div class="flex flex-wrap items-center gap-3">
+                <button type="submit" class="inline-flex items-center justify-center rounded-2xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-amber-300">
+                  Сохранить и применить в Marzban
+                </button>
+                <a href="{{ preview_iframe_url or '/admin/marzban-page/preview' }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-900">
+                  Ещё раз открыть preview
+                </a>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      {% if deployed_template_excerpt %}
+      <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
+        <div class="mb-4">
+          <h2 class="text-xl font-semibold text-white">Фрагмент текущего live HTML <span class="help-dot" tabindex="0" data-tooltip="Небольшой фрагмент того, что уже лежит в deploy target. Удобно для быстрого визуального контроля перед apply.">?</span></h2>
+          <p class="mt-2 text-sm text-slate-400">Быстрый контроль того, что сейчас уже лежит в deploy target.</p>
+        </div>
+        <pre class="max-h-[340px] overflow-auto rounded-2xl border border-slate-800 bg-slate-950 p-4 text-xs leading-6 text-slate-300">{{ deployed_template_excerpt }}</pre>
+      </div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

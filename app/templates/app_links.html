@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Ссылки на приложения{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Система / Ссылки на приложения</div>
+      <h1 class="mt-4 flex items-center gap-2 text-3xl font-bold text-white">
+        <span>Ссылки на приложения</span>
+        <span class="help-dot" data-tooltip="В этом разделе настраиваются публичные ссылки на приложение и инструкцию для каждой платформы. Эти ссылки используются в пользовательском сценарии подключения VPN в боте.">?</span>
+      </h1>
+      <p class="mt-2 text-slate-400">
+        Укажите публичную ссылку на приложение и инструкцию для каждой платформы.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Web-admin работает в local-only режиме и должен открываться через SSH-туннель.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/system/"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        title="Вернуться на главную страницу системной панели"
+      >
+        ← На главную
+      </a>
+    </div>
+  </div>
+
+  {% if success_message is defined and success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message is defined and error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+      <span>Важно</span>
+      <span class="help-dot" data-tooltip="Система принимает только публичные абсолютные URL. Пустое поле теперь очищает значение в базе и не оставляет старую ссылку автоматически.">?</span>
+    </h2>
+    <div class="mt-3 space-y-3 text-sm leading-6 text-slate-400">
+      <p>
+        Эти ссылки используются в пользовательском сценарии подключения VPN: для перехода к приложению и к инструкции по настройке для конкретной платформы.
+      </p>
+      <p>
+        Допускаются только <span class="text-slate-200">публичные абсолютные ссылки</span>, например:
+        <span class="text-slate-200">https://example.com/app</span>.
+      </p>
+      <p>
+        Нельзя использовать:
+        <span class="text-rose-300">localhost</span>,
+        <span class="text-rose-300">127.0.0.1</span>,
+        приватные IP-адреса,
+        а также внутренние ссылки вида <span class="text-rose-300">/admin/...</span>.
+      </p>
+      <p>
+        Если ссылку нужно <span class="text-slate-200">удалить</span>, просто очистите поле и сохраните форму.
+        Пустое значение будет записано как <span class="text-slate-200">NULL</span>.
+        Старое значение больше не сохраняется автоматически.
+      </p>
+    </div>
+  </div>
+
+  <div class="space-y-5">
+    {% for link in links %}
+    <form method="post" action="/admin/links/{{ link.id }}" class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+            <span>{{ link.os_name }}</span>
+            <span class="help-dot" data-tooltip="Для каждой платформы можно отдельно задать ссылку на приложение и ссылку на инструкцию. Эти кнопки будут показываться пользователю в зависимости от его платформы.">?</span>
+          </h2>
+          <p class="mt-1 text-sm text-slate-400">
+            Настройка ссылок для платформы {{ link.os_name }}.
+          </p>
+        </div>
+
+        <button
+          type="submit"
+          class="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+          title="Сохранить ссылки для платформы {{ link.os_name }}"
+        >
+          Сохранить
+        </button>
+      </div>
+
+      <div class="mb-5 rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-xs leading-6 text-slate-400">
+        Подсказка: оставьте валидный публичный URL, если ссылка должна работать, или очистите поле полностью, если ссылку нужно убрать.
+      </div>
+
+      <div class="grid gap-6 xl:grid-cols-3">
+        <div class="grid gap-4 md:grid-cols-2 xl:col-span-2">
+          <label class="block md:col-span-1">
+            <span class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Ссылка на приложение</span>
+              <span class="help-dot" data-tooltip="Публичная ссылка на страницу приложения, установщик или магазин приложений для этой платформы. Пустое поле очищает значение.">?</span>
+            </span>
+            <input
+              type="url"
+              name="download_url"
+              value="{{ link.download_url or '' }}"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400"
+              placeholder="https://example.com/app"
+            />
+            <span class="mt-2 block text-xs text-slate-500">
+              Только публичный URL. Пустое поле полностью очищает ссылку в БД.
+            </span>
+          </label>
+
+          <label class="block md:col-span-1">
+            <span class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Ссылка на инструкцию</span>
+              <span class="help-dot" data-tooltip="Публичная ссылка на инструкцию по установке и настройке VPN для этой платформы. Лучше использовать страницу без авторизации. Пустое поле очищает значение.">?</span>
+            </span>
+            <input
+              type="url"
+              name="guide_url"
+              value="{{ link.guide_url or '' }}"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-400"
+              placeholder="https://example.com/guide"
+            />
+            <span class="mt-2 block text-xs text-slate-500">
+              Лучше указывать публичную страницу инструкции без авторизации. Пустое поле полностью очищает ссылку.
+            </span>
+          </label>
+        </div>
+
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+            <span>Предпросмотр</span>
+            <span class="help-dot" data-tooltip="Здесь показывается, какие ссылки сейчас сохранены для платформы. Если поле пустое, после сохранения соответствующая пользовательская кнопка исчезнет.">?</span>
+          </div>
+
+          <div class="mt-4 space-y-4">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-500">Ссылка на приложение</div>
+              <div class="mt-2 break-words text-sm text-slate-300">
+                {{ link.download_url or 'Не задана' }}
+              </div>
+              {% if link.download_url %}
+              <a
+                href="{{ link.download_url }}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="mt-3 inline-flex rounded-xl bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400"
+                title="Открыть сохранённую ссылку на приложение для платформы {{ link.os_name }}"
+              >
+                Открыть приложение
+              </a>
+              {% else %}
+              <div class="mt-3 text-xs text-slate-500">
+                После очистки поля ссылка будет удалена и кнопка исчезнет.
+              </div>
+              {% endif %}
+            </div>
+
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-500">Ссылка на инструкцию</div>
+              <div class="mt-2 break-words text-sm text-slate-300">
+                {{ link.guide_url or 'Не задана' }}
+              </div>
+              {% if link.guide_url %}
+              <a
+                href="{{ link.guide_url }}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="mt-3 inline-flex rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+                title="Открыть сохранённую инструкцию для платформы {{ link.os_name }}"
+              >
+                Открыть инструкцию
+              </a>
+              {% else %}
+              <div class="mt-3 text-xs text-slate-500">
+                После очистки поля ссылка будет удалена и кнопка исчезнет.
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+    {% else %}
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 px-6 py-8 text-center text-sm text-slate-400 shadow-xl">
+      Платформенные ссылки пока не настроены.
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

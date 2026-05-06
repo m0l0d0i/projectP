@@ -1,0 +1,498 @@
+{% extends "base.html" %}
+
+{% block title %}Промокоды{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Промокоды</div>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <h1 class="text-3xl font-bold text-white">Промокоды</h1>
+        <span
+          class="help-dot"
+          tabindex="0"
+          data-tooltip="Управление фиксированными бонусными промокодами: создание, редактирование, архивирование, повторная активация и безопасное удаление неиспользованных кодов."
+          aria-label="Подсказка по разделу промокодов"
+        >?</span>
+      </div>
+      <p class="mt-2 text-slate-400">
+        Полный CRUD промокодов: создание, редактирование, архивирование, повторная активация и безопасное удаление неиспользованных кодов.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Поддерживается только фиксированная сумма бонуса. Если промокод уже использовался, физическое удаление недоступно — его можно только архивировать.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/system/"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        title="Вернуться на главную страницу веб-админки"
+      >
+        ← На главную
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-6 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Всего</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Все промокоды в системе, включая архивные, истёкшие и исчерпанные." aria-label="Подсказка по счётчику всех промокодов">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ counts.total if counts else (total or 0) }}</div>
+      <p class="mt-2 text-sm text-slate-400">Все промокоды в системе.</p>
+    </div>
+
+    <div class="rounded-3xl border border-emerald-500/20 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-emerald-300">
+        <span>Активные</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Промокоды, которые можно применить прямо сейчас: они активны, не истекли и не исчерпали лимит использований." aria-label="Подсказка по активным промокодам">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ counts.active if counts else 0 }}</div>
+      <p class="mt-2 text-sm text-slate-400">Могут использоваться прямо сейчас.</p>
+    </div>
+
+    <div class="rounded-3xl border border-amber-500/20 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-amber-300">
+        <span>Истекли / исчерпаны</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Промокоды, срок действия которых закончился, либо достигнут лимит max_uses. Их стоит проверить и при необходимости архивировать." aria-label="Подсказка по промокодам, требующим внимания">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ (counts.expired if counts else 0) + (counts.exhausted if counts else 0) }}</div>
+      <p class="mt-2 text-sm text-slate-400">Требуют проверки или архивации.</p>
+    </div>
+
+    <div class="rounded-3xl border border-slate-700 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-400">
+        <span>В архиве</span>
+        <span class="help-dot" tabindex="0" data-tooltip="Архивные промокоды выключены вручную. Их можно просматривать и при необходимости повторно активировать." aria-label="Подсказка по архиву промокодов">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ counts.archived if counts else 0 }}</div>
+      <p class="mt-2 text-sm text-slate-400">Неактивные коды, доступные для восстановления.</p>
+    </div>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-3">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-2">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold text-white">
+              {% if edit_promo %}Редактирование промокода #{{ edit_promo.id }}{% else %}Создать промокод{% endif %}
+            </h2>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Код нормализуется в верхний регистр. Пустой лимит использований означает отсутствие ограничения. Сумма бонуса задаётся в рублях и применяется как фиксированное начисление."
+              aria-label="Подсказка по форме промокода"
+            >?</span>
+          </div>
+          <p class="mt-2 text-sm text-slate-400">
+            {% if edit_promo %}
+              Изменения применяются сразу. Код нормализуется в верхний регистр, а пустой лимит использований означает отсутствие ограничения.
+            {% else %}
+              Если поле кода оставить пустым, backend сгенерирует его автоматически. Фиксированная скидка задаётся в рублях.
+            {% endif %}
+          </p>
+        </div>
+
+        {% if edit_promo %}
+        <a
+          href="/admin/promocodes/?status={{ status_filter or 'all' }}{% if search_query %}&q={{ search_query | urlencode }}{% endif %}"
+          class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          title="Выйти из режима редактирования и вернуться к списку промокодов"
+        >
+          Сбросить режим редактирования
+        </a>
+        {% endif %}
+      </div>
+
+      <form method="post" action="/admin/promocodes/" class="mt-6 grid gap-4 md:grid-cols-2">
+        <input type="hidden" name="action" value="{% if edit_promo %}update{% else %}create{% endif %}">
+        {% if edit_promo %}
+        <input type="hidden" name="promo_id" value="{{ edit_promo.id }}">
+        {% endif %}
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Код</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Уникальный код промокода. Можно оставить пустым только при создании — тогда система сгенерирует его автоматически."
+              aria-label="Подсказка по полю кода промокода"
+            >?</span>
+          </label>
+          <input
+            type="text"
+            name="code"
+            maxlength="64"
+            placeholder="Например: SPRING2026"
+            value="{{ edit_form.code if edit_form else '' }}"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >
+          <p class="mt-2 text-xs text-slate-500">
+            {% if edit_promo %}При редактировании код должен оставаться уникальным.{% else %}Оставьте пустым для автогенерации.{% endif %}
+          </p>
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Сумма бонуса</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Фиксированная сумма в рублях, которая начисляется пользователю при успешном применении промокода. Должна быть больше нуля."
+              aria-label="Подсказка по сумме бонуса"
+            >?</span>
+          </label>
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            name="bonus_amount"
+            required
+            placeholder="Например: 50.00"
+            value="{{ edit_form.bonus_amount if edit_form else '' }}"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Максимум использований</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Сколько раз промокод можно применить. Пустое значение означает отсутствие лимита. Если лимит задан, он должен быть не меньше 1."
+              aria-label="Подсказка по лимиту использований"
+            >?</span>
+          </label>
+          <input
+            type="number"
+            min="1"
+            name="max_uses"
+            placeholder="Пусто = без лимита"
+            value="{{ edit_form.max_uses if edit_form and edit_form.max_uses is not none else '' }}"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Дата истечения</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="После этой даты промокод станет недействительным. Пустое поле означает бессрочный промокод."
+              aria-label="Подсказка по сроку действия промокода"
+            >?</span>
+          </label>
+          <input
+            type="datetime-local"
+            name="expires_at"
+            value="{{ edit_form.expires_at if edit_form else '' }}"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+          >
+        </div>
+
+        <div class="md:col-span-2">
+          <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              name="is_active"
+              value="true"
+              {% if edit_form and edit_form.is_active %}checked{% elif not edit_form %}checked{% endif %}
+              class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-cyan-500"
+            >
+            {% if edit_promo %}Сделать промокод активным после сохранения{% else %}Активировать сразу после создания{% endif %}
+          </label>
+          <p class="mt-2 text-xs text-slate-500">Архивный промокод можно восстановить позже через список ниже.</p>
+        </div>
+
+        <div class="md:col-span-2 flex flex-wrap gap-3">
+          <button
+            type="submit"
+            class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+            title="Сохранить промокод с текущими параметрами"
+          >
+            {% if edit_promo %}Сохранить изменения{% else %}Создать промокод{% endif %}
+          </button>
+
+          {% if edit_promo %}
+          <a
+            href="/admin/promocodes/?status={{ status_filter or 'all' }}{% if search_query %}&q={{ search_query | urlencode }}{% endif %}"
+            class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+            title="Отменить редактирование без сохранения изменений"
+          >
+            Отменить редактирование
+          </a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2">
+        <h2 class="text-xl font-semibold text-white">Справка</h2>
+        <span
+          class="help-dot"
+          tabindex="0"
+          data-tooltip="Подсказки по статусам промокодов и ограничениям web-admin. Использованный промокод нельзя удалять физически, чтобы не ломать историю начислений."
+          aria-label="Подсказка по справке промокодов"
+        >?</span>
+      </div>
+      <div class="mt-5 space-y-4 text-sm leading-6 text-slate-400">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="font-medium text-white">Статусы</div>
+          <div class="mt-2 space-y-2">
+            <p><span class="font-medium text-emerald-300">Активен</span> — код доступен для применения.</p>
+            <p><span class="font-medium text-slate-300">В архиве</span> — код выключен вручную и может быть восстановлен.</p>
+            <p><span class="font-medium text-amber-300">Истёк</span> — срок действия прошёл.</p>
+            <p><span class="font-medium text-rose-300">Лимит исчерпан</span> — достигнут лимит <code class="rounded bg-slate-900 px-1 py-0.5 text-slate-200">max_uses</code>.</p>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          Пустой лимит использований означает отсутствие ограничения. Удалять через web-admin можно только промокоды без использований, чтобы не ломать историю начислений.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
+    <div class="border-b border-slate-800 px-6 py-5">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-xl font-semibold text-white">Список промокодов</h2>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Список поддерживает фильтр по статусу и поиск по коду. Здесь же доступны редактирование, архивация, повторная активация и удаление неиспользованных промокодов."
+              aria-label="Подсказка по списку промокодов"
+            >?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">
+            Страница {{ page or 1 }} • Найдено: {{ total or 0 }}
+          </p>
+        </div>
+
+        <form method="get" action="/admin/promocodes/" class="grid gap-3 md:grid-cols-3 lg:min-w-[760px]">
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <span>Статус</span>
+              <span class="help-dot" tabindex="0" data-tooltip="Фильтр по административному статусу промокода: активные, архивные, истёкшие и другие категории." aria-label="Подсказка по фильтру статуса">?</span>
+            </label>
+            <select
+              name="status"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            >
+              {% for option in status_options %}
+              <option value="{{ option.value }}" {% if option.value == status_filter %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="md:col-span-2">
+            <label class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <span>Поиск по коду</span>
+              <span class="help-dot" tabindex="0" data-tooltip="Ищет промокоды по значению кода. Полезно для быстрых проверок и редактирования конкретного промокода." aria-label="Подсказка по поиску промокодов">?</span>
+            </label>
+            <input
+              type="text"
+              name="q"
+              value="{{ search_query or '' }}"
+              placeholder="Например: SPRING или REF"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </div>
+
+          <div class="md:col-span-3 flex flex-wrap gap-3">
+            <button
+              type="submit"
+              class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+              title="Применить выбранные фильтры и обновить список промокодов"
+            >
+              Применить фильтры
+            </button>
+            <a
+              href="/admin/promocodes/"
+              class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+              title="Сбросить фильтры и показать полный список промокодов"
+            >
+              Сбросить
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Код</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Бонус</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Использования</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Истекает</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Действия</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% for row in promo_rows %}
+          <tr class="align-top hover:bg-slate-800/40">
+            <td class="px-6 py-4 text-sm text-white">#{{ row.id }}</td>
+            <td class="px-6 py-4 text-sm font-medium text-white">
+              <div>{{ row.code }}</div>
+              {% if row.created_at %}
+              <div class="mt-1 text-xs text-slate-500">Создан: {{ row.created_at.strftime("%Y-%m-%d %H:%M UTC") }}</div>
+              {% else %}
+              <div class="mt-1 text-xs text-slate-500">Дата создания не указана</div>
+              {% endif %}
+            </td>
+            <td class="px-6 py-4 text-sm text-slate-300">{{ row.bonus_amount }} ₽</td>
+            <td class="px-6 py-4 text-sm text-slate-300">
+              {{ row.used_count }}
+              {% if row.max_uses %}
+                / {{ row.max_uses }}
+              {% else %}
+                / ∞
+              {% endif %}
+            </td>
+            <td class="px-6 py-4 text-sm text-slate-300">
+              {% if row.expires_at %}
+                {{ row.expires_at.strftime("%Y-%m-%d %H:%M UTC") }}
+              {% else %}
+                Не задана
+              {% endif %}
+            </td>
+            <td class="px-6 py-4 text-sm">
+              <span class="inline-flex rounded-full border px-2 py-1 text-xs font-semibold
+                {% if row.status_tone == 'emerald' %}border-emerald-500/30 bg-emerald-500/10 text-emerald-300{% elif row.status_tone == 'amber' %}border-amber-500/30 bg-amber-500/10 text-amber-300{% elif row.status_tone == 'rose' %}border-rose-500/30 bg-rose-500/10 text-rose-300{% else %}border-slate-700 bg-slate-950 text-slate-300{% endif %}
+              ">
+                {{ row.status_label }}
+              </span>
+            </td>
+            <td class="px-6 py-4">
+              <div class="flex min-w-[260px] flex-col gap-2">
+                <a
+                  href="/admin/promocodes/?page={{ page or 1 }}&status={{ status_filter or 'all' }}{% if search_query %}&q={{ search_query | urlencode }}{% endif %}&edit_id={{ row.id }}"
+                  class="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+                  title="Открыть промокод в режиме редактирования"
+                >
+                  Редактировать
+                </a>
+
+                {% if row.can_archive %}
+                <form method="post" action="/admin/promocodes/" class="inline-flex">
+                  <input type="hidden" name="action" value="archive">
+                  <input type="hidden" name="promo_id" value="{{ row.id }}">
+                  <button
+                    type="submit"
+                    class="inline-flex w-full items-center justify-center rounded-xl bg-rose-500 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-400"
+                    title="Перевести промокод в архив без удаления истории использований"
+                  >
+                    Архивировать
+                  </button>
+                </form>
+                {% endif %}
+
+                {% if row.can_activate %}
+                <form method="post" action="/admin/promocodes/" class="inline-flex">
+                  <input type="hidden" name="action" value="activate">
+                  <input type="hidden" name="promo_id" value="{{ row.id }}">
+                  <button
+                    type="submit"
+                    class="inline-flex w-full items-center justify-center rounded-xl bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400"
+                    title="Повторно активировать архивный или отключённый промокод"
+                  >
+                    Активировать
+                  </button>
+                </form>
+                {% endif %}
+
+                {% if row.can_delete %}
+                <form method="post" action="/admin/promocodes/" class="inline-flex" onsubmit="return confirm('Удалить промокод {{ row.code }}? Это действие нельзя отменить.');">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="promo_id" value="{{ row.id }}">
+                  <button
+                    type="submit"
+                    class="inline-flex w-full items-center justify-center rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300 hover:border-rose-400 hover:text-rose-200"
+                    title="Полностью удалить неиспользованный промокод"
+                  >
+                    Удалить
+                  </button>
+                </form>
+                {% else %}
+                <div class="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-500">
+                  {% if row.used_count and row.used_count > 0 %}
+                    Удаление недоступно: промокод уже использовался.
+                  {% else %}
+                    Физическое удаление недоступно для текущего статуса.
+                  {% endif %}
+                </div>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7" class="px-6 py-8 text-center text-sm text-slate-400">
+              {% if search_query or (status_filter and status_filter != 'all') %}
+                По текущим фильтрам промокоды не найдены.
+              {% else %}
+                Промокодов пока нет.
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if has_prev or has_next %}
+    <div class="flex flex-col gap-3 border-t border-slate-800 px-6 py-5 md:flex-row md:items-center md:justify-between">
+      <div class="text-sm text-slate-400">Страница {{ page }}</div>
+
+      <div class="flex gap-3">
+        {% if has_prev %}
+        <a
+          href="/admin/promocodes/?page={{ page - 1 }}&status={{ status_filter or 'all' }}{% if search_query %}&q={{ search_query | urlencode }}{% endif %}"
+          class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          title="Перейти на предыдущую страницу списка промокодов"
+        >
+          ← Назад
+        </a>
+        {% endif %}
+
+        {% if has_next %}
+        <a
+          href="/admin/promocodes/?page={{ page + 1 }}&status={{ status_filter or 'all' }}{% if search_query %}&q={{ search_query | urlencode }}{% endif %}"
+          class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+          title="Перейти на следующую страницу списка промокодов"
+        >
+          Вперёд →
+        </a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

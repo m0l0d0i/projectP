@@ -1,0 +1,684 @@
+{% extends "base.html" %}
+
+{% block title %}Рассылки{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Рассылки</div>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <h1 class="text-3xl font-bold text-white">Рассылки</h1>
+        <span class="help-dot" data-tooltip="Здесь управляются черновики, отложенные и уже выполненные рассылки. Раздел рассчитан на rich payload: текст, одно фото и inline-кнопки в несколько рядов.">?</span>
+      </div>
+      <p class="mt-2 text-slate-400">
+        Полноценное управление массовыми рассылками: черновики, отложенная отправка, rich payload, тестовая отправка и контроль жизненного цикла задачи.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Поддерживаются текст, одно фото, inline-кнопки в несколько рядов и отложенный запуск.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/system/"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        title="Вернуться на главную страницу админки"
+      >
+        ← На главную
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm whitespace-pre-wrap text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="help-inline text-sm text-slate-400">
+        <span>Всего задач</span>
+        <span class="help-dot" data-tooltip="Общее количество задач рассылки в системе независимо от статуса: черновики, отложенные, выполняющиеся, завершённые, отменённые и с ошибкой.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ summary_counts.total or total or 0 }}</div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="help-inline text-sm text-slate-400">
+        <span>Активные</span>
+        <span class="help-dot" data-tooltip="Сюда входят запланированные и уже выполняющиеся задачи. Именно они ещё могут повлиять на пользователей в ближайшем цикле воркера.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ summary_counts.active or active_count or 0 }}</div>
+      <div class="mt-2 text-xs text-slate-500">Запланированные + выполняющиеся</div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="help-inline text-sm text-slate-400">
+        <span>Черновики</span>
+        <span class="help-dot" data-tooltip="Черновики можно безопасно редактировать, клонировать и удалять. Они ещё не попадут в рабочий цикл, пока не будут переведены в запланированные.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ summary_counts.draft or 0 }}</div>
+      <div class="mt-2 text-xs text-slate-500">Можно редактировать и удалять</div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="help-inline text-sm text-slate-400">
+        <span>Завершённые / ошибки / отменённые</span>
+        <span class="help-dot" data-tooltip="Итоговые статусы задач. Их уже нельзя редактировать, но можно просматривать и клонировать для повторной отправки.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ (summary_counts.completed or 0) + (summary_counts.failed or 0) + (summary_counts.cancelled or 0) }}</div>
+      <div class="mt-2 text-xs text-slate-500">
+        {{ summary_counts.completed or 0 }} / {{ summary_counts.failed or 0 }} / {{ summary_counts.cancelled or 0 }}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-3">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-2">
+      <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div class="help-inline text-xl font-semibold text-white">
+            <span>{% if edit_job %}Редактирование рассылки #{{ edit_form.job_id }}{% else %}Создать рассылку{% endif %}</span>
+            <span class="help-dot" data-tooltip="Форма работает и для создания, и для редактирования. Менять можно только черновики и задачи, которые ещё не стартовали.">?</span>
+          </div>
+          <p class="mt-2 text-sm text-slate-400">
+            {% if edit_job %}
+              Редактировать можно только черновики и ещё не запущенные рассылки. Время запуска задаётся через поле даты и времени.
+            {% else %}
+              Можно создать черновик, запланировать отправку или отправить задачу в ближайший цикл воркера.
+            {% endif %}
+          </p>
+        </div>
+
+        {% if edit_job %}
+        <a
+          href="/admin/broadcasts/"
+          class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          title="Выйти из режима редактирования и очистить форму"
+        >
+          Сбросить режим редактирования
+        </a>
+        {% endif %}
+      </div>
+
+      <form method="post" action="/admin/broadcasts/" class="mt-6 grid gap-4">
+        <input type="hidden" name="action" value="{% if edit_job %}update{% else %}create{% endif %}">
+        <input type="hidden" name="job_id" value="{{ edit_form.job_id or '' }}">
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Текст рассылки</span>
+            <span class="help-dot" data-tooltip="Можно оставить пустым, если рассылка состоит только из фото. Если отправляется фото с подписью, подпись хранится именно в этом поле.">?</span>
+          </label>
+          <textarea
+            name="text_value"
+            rows="8"
+            placeholder="Введите текст рассылки или подпись к фото"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >{{ edit_form.text_value or '' }}</textarea>
+          <p class="mt-2 text-xs text-slate-500">
+            У рассылки должен быть текст или <span class="text-slate-300">photo_file_id</span>.
+          </p>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Фото: file_id</span>
+              <span class="help-dot" data-tooltip="Если поле заполнено, воркер отправит сообщение как фото через Telegram send_photo. Сейчас поддерживается только одно фото на задачу.">?</span>
+            </label>
+            <input
+              type="text"
+              name="photo_file_id"
+              value="{{ edit_form.photo_file_id or '' }}"
+              placeholder="Например: AgACAgIAAxkBA..."
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+            <p class="mt-2 text-xs text-slate-500">Пустое поле означает рассылку без фото.</p>
+          </div>
+
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Фото: file_unique_id</span>
+              <span class="help-dot" data-tooltip="Не обязателен для отправки, но полезен для стабильной идентификации медиа и диагностики при повторном использовании одного и того же файла.">?</span>
+            </label>
+            <input
+              type="text"
+              name="photo_file_unique_id"
+              value="{{ edit_form.photo_file_unique_id or '' }}"
+              placeholder="Необязательно"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+            <p class="mt-2 text-xs text-slate-500">Можно оставить пустым.</p>
+          </div>
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Inline-кнопки (JSON)</span>
+            <span class="help-dot" data-tooltip="Это массив рядов. Каждый ряд — массив кнопок. У каждой кнопки должен быть text и ровно одно действие: url или callback_data.">?</span>
+          </label>
+          <textarea
+            name="keyboard_json"
+            rows="9"
+            placeholder='[[{"text":"Открыть сайт","url":"https://example.com"}], [{"text":"Поддержка","callback_data":"support:open"}]]'
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >{{ edit_form.keyboard_json or '' }}</textarea>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button type="button" id="broadcast-fill-keyboard-sample" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Подставить пример валидного keyboard_json">
+              Подставить пример
+            </button>
+            <button type="button" id="broadcast-clear-keyboard" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-rose-500 hover:text-white" title="Очистить поле keyboard_json">
+              Очистить JSON
+            </button>
+          </div>
+          <p class="mt-2 text-xs leading-6 text-slate-500">
+            Пример нескольких рядов: первый ряд — кнопка на URL, второй ряд — callback-кнопка. Для массовых рассылок чаще используются URL-кнопки.
+          </p>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Дата и время запуска</span>
+              <span class="help-dot" data-tooltip="Пустое поле означает, что задача будет готова к ближайшему запуску воркера. Для отложенной рассылки укажи дату и время заранее.">?</span>
+            </label>
+            <input
+              id="broadcast-run-at"
+              type="datetime-local"
+              name="run_at"
+              value="{{ edit_form.run_at or '' }}"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            >
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button type="button" data-offset-minutes="15" class="broadcast-quick-fill rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Выставить время запуска через 15 минут">
+                Через 15 минут
+              </button>
+              <button type="button" data-offset-minutes="60" class="broadcast-quick-fill rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Выставить время запуска через 1 час">
+                Через 1 час
+              </button>
+              <button type="button" data-tomorrow-hour="10" class="broadcast-tomorrow-fill rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Выставить время запуска на завтра в 10:00">
+                Завтра в 10:00
+              </button>
+              <button type="button" id="broadcast-clear-run-at" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-rose-500 hover:text-white" title="Очистить дату и время запуска">
+                Очистить
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Режим</span>
+              <span class="help-dot" data-tooltip="Черновик можно безопасно дорабатывать. Запланированная рассылка попадёт в очередь выполнения и будет обработана воркером по run_at.">?</span>
+            </label>
+            <select
+              name="status"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            >
+              <option value="scheduled" {% if (edit_form.status or 'scheduled') == 'scheduled' %}selected{% endif %}>Запланированная</option>
+              <option value="draft" {% if edit_form.status == 'draft' %}selected{% endif %}>Черновик</option>
+            </select>
+            <div class="mt-3 rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-400">
+              <div><span class="font-semibold text-white">Черновик</span> — можно редактировать, клонировать и удалить.</div>
+              <div class="mt-2"><span class="font-semibold text-white">Запланированная</span> — уйдёт в обработку воркером по <span class="font-mono text-slate-200">run_at</span>.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+          <button
+            type="submit"
+            class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+            title="Сохранить текущую конфигурацию рассылки"
+          >
+            {% if edit_job %}Сохранить изменения{% else %}Создать рассылку{% endif %}
+          </button>
+
+          {% if edit_job %}
+          <button
+            type="submit"
+            name="action"
+            value="clone"
+            class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+            title="Создать копию текущей рассылки"
+          >
+            Клонировать
+          </button>
+          {% endif %}
+
+          <a
+            href="/admin/system/"
+            class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+            title="Вернуться в системный раздел"
+          >
+            На главную
+          </a>
+        </div>
+      </form>
+
+      {% if preview_payload %}
+      <div class="mt-6 rounded-3xl border border-slate-800 bg-slate-950 p-5">
+        <div class="help-inline text-sm font-semibold text-white">
+          <span>Превью текущей версии</span>
+          <span class="help-dot" data-tooltip="Предпросмотр показывает итоговый payload, который будет использоваться для отправки после сохранения формы. Это удобно для быстрой визуальной проверки перед тестом или запуском.">?</span>
+        </div>
+        <pre class="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-300">{{ preview_payload }}</pre>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="space-y-6">
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="help-inline text-xl font-semibold text-white">
+          <span>Тестовая отправка</span>
+          <span class="help-dot" data-tooltip="Перед запуском можно отправить rich payload на один Telegram ID и проверить текст, фото и клавиатуру без массовой рассылки пользователям.">?</span>
+        </div>
+        <p class="mt-2 text-sm text-slate-400">
+          Перед запуском можно отправить rich payload на один Telegram ID и проверить отображение текста, фото и клавиатуры.
+        </p>
+
+        <form method="post" action="/admin/broadcasts/test" class="mt-6 grid gap-4">
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Текст</span>
+              <span class="help-dot" data-tooltip="Можно оставить пустым, если тестируется только фото. Если указаны и текст, и фото, текст будет использоваться как подпись к фото.">?</span>
+            </label>
+            <textarea
+              name="text_value"
+              rows="5"
+              placeholder="Можно оставить пустым, если тестируете только фото"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            ></textarea>
+          </div>
+
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Telegram ID для теста</span>
+              <span class="help-dot" data-tooltip="Если поле пустое, backend попробует взять ID из startup_notify_ids, а затем из admin_ids. Лучше указывать свой Telegram ID явно.">?</span>
+            </label>
+            <input
+              type="text"
+              name="test_tg_id"
+              placeholder="Можно оставить пустым"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </div>
+
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Фото: file_id</span>
+              <span class="help-dot" data-tooltip="Используй Telegram file_id уже загруженного изображения. Это позволяет проверить вид реальной media-рассылки без повторной загрузки файла.">?</span>
+            </label>
+            <input
+              type="text"
+              name="photo_file_id"
+              placeholder="Необязательно"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </div>
+
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Фото: file_unique_id</span>
+              <span class="help-dot" data-tooltip="Поле не обязательно для самой тестовой отправки, но полезно для диагностического сохранения и сопоставления медиа.">?</span>
+            </label>
+            <input
+              type="text"
+              name="photo_file_unique_id"
+              placeholder="Необязательно"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            >
+          </div>
+
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Inline-кнопки (JSON)</span>
+              <span class="help-dot" data-tooltip="Формат такой же, как у основной формы. У каждой кнопки должен быть text и одно действие: url или callback_data.">?</span>
+            </label>
+            <textarea
+              name="keyboard_json"
+              rows="6"
+              placeholder='[[{"text":"Перейти","url":"https://example.com"}]]'
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+            ></textarea>
+          </div>
+
+          <button
+            type="submit"
+            class="inline-flex items-center justify-center rounded-2xl bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-white"
+            title="Отправить тестовую версию рассылки на один Telegram ID"
+          >
+            Отправить тест
+          </button>
+        </form>
+      </div>
+
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="help-inline text-xl font-semibold text-white">
+          <span>Подсказки</span>
+          <span class="help-dot" data-tooltip="Короткий справочный блок по поведению тестовой отправки, формату кнопок и ограничениям жизненного цикла задач.">?</span>
+        </div>
+        <div class="mt-3 space-y-3 text-sm leading-6 text-slate-400">
+          <p>
+            Для тестовой отправки backend сначала использует Telegram ID из формы. Если поле пустое, он попробует взять
+            <span class="text-slate-200">startup_notify_ids</span>, затем <span class="text-slate-200">admin_ids</span>.
+          </p>
+          <p>
+            В <span class="font-mono text-slate-200">keyboard_json</span> у каждой кнопки должен быть <span class="text-slate-200">text</span> и ровно одно действие:
+            <span class="text-slate-200">url</span> или <span class="text-slate-200">callback_data</span>.
+          </p>
+          <p>
+            Запущенную рассылку удалить уже нельзя, но можно запросить отмену. Черновики и ещё не стартовавшие задачи можно редактировать и удалять.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
+    <div class="flex flex-col gap-4 border-b border-slate-800 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <div class="help-inline text-xl font-semibold text-white">
+          <span>Список задач рассылки</span>
+          <span class="help-dot" data-tooltip="Здесь показываются последние задачи, их контент, прогресс обработки и доступные действия по каждому статусу.">?</span>
+        </div>
+        <p class="mt-1 text-sm text-slate-400">
+          Последние задачи, их rich payload и текущее состояние жизненного цикла.
+        </p>
+      </div>
+
+      <form method="get" action="/admin/broadcasts/" class="flex flex-wrap items-center gap-3">
+        <label class="help-inline text-sm text-slate-400">
+          <span>Статус</span>
+          <span class="help-dot" data-tooltip="Фильтр помогает быстро отделить черновики от активных и завершённых задач. Удобно для повседневной работы и диагностики.">?</span>
+        </label>
+        <select
+          name="status"
+          class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-white outline-none focus:border-cyan-500"
+        >
+          {% for value, label in status_options %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button
+          type="submit"
+          class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          title="Применить выбранный фильтр"
+        >
+          Применить
+        </button>
+        {% if status_filter != 'all' %}
+        <a
+          href="/admin/broadcasts/"
+          class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          title="Сбросить фильтр статуса"
+        >
+          Сбросить
+        </a>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Запуск</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Контент</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Прогресс</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Ошибка</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Действия</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% for row in job_rows %}
+          <tr class="align-top hover:bg-slate-800/40">
+            <td class="px-6 py-4 text-sm text-white">#{{ row.id }}</td>
+
+            <td class="px-6 py-4 text-sm">
+              {% if row.status_tone == 'amber' %}
+              <span class="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300">{{ row.status_label }}</span>
+              {% elif row.status_tone == 'cyan' %}
+              <span class="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-300">{{ row.status_label }}</span>
+              {% elif row.status_tone == 'emerald' %}
+              <span class="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">{{ row.status_label }}</span>
+              {% elif row.status_tone == 'rose' %}
+              <span class="inline-flex rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300">{{ row.status_label }}</span>
+              {% else %}
+              <span class="inline-flex rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-xs font-semibold text-slate-300">{{ row.status_label }}</span>
+              {% endif %}
+
+              {% if row.cancel_requested %}
+              <div class="mt-2 text-xs text-amber-300">Запрошена отмена</div>
+              {% endif %}
+            </td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">{{ row.run_at_label }}</td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">
+              <div class="max-w-xl space-y-2">
+                <div class="whitespace-pre-wrap break-words">{{ row.preview_text }}</div>
+                <div class="flex flex-wrap gap-2 text-xs">
+                  {% if row.has_media %}
+                  <span class="inline-flex rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-slate-300">Фото</span>
+                  {% endif %}
+                  {% if row.has_keyboard %}
+                  <span class="inline-flex rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-slate-300">Inline-кнопки</span>
+                  {% endif %}
+                  {% if not row.has_media and not row.has_keyboard %}
+                  <span class="inline-flex rounded-full border border-slate-800 bg-slate-950 px-2 py-1 text-slate-500">Только текст</span>
+                  {% endif %}
+                </div>
+              </div>
+            </td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">
+              <div>Обработано: {{ row.job.processed_users }}</div>
+              <div>Отправлено: {{ row.job.sent_count }}</div>
+              <div>Ошибок: {{ row.job.failed_count }}</div>
+              <div>Всего: {{ row.job.total_users }}</div>
+            </td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">
+              <div class="max-w-sm break-words">
+                {{ row.job.last_error or 'Не зафиксирована' }}
+              </div>
+            </td>
+
+            <td class="px-6 py-4 text-sm text-slate-300">
+              <div class="flex max-w-xs flex-wrap gap-2">
+                {% if row.is_editable %}
+                <a
+                  href="/admin/broadcasts/?edit_id={{ row.id }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}"
+                  class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+                  title="Открыть задачу в режиме редактирования"
+                >
+                  Редактировать
+                </a>
+
+                <form method="post" action="/admin/broadcasts/" onsubmit="return confirm('Удалить эту рассылку?');">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="job_id" value="{{ row.id }}">
+                  <button
+                    type="submit"
+                    class="inline-flex rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/20"
+                    title="Удалить задачу полностью"
+                  >
+                    Удалить
+                  </button>
+                </form>
+                {% endif %}
+
+                {% if row.can_request_cancel %}
+                <form method="post" action="/admin/broadcasts/" onsubmit="return confirm('Запросить отмену этой рассылки?');">
+                  <input type="hidden" name="action" value="cancel">
+                  <input type="hidden" name="job_id" value="{{ row.id }}">
+                  <button
+                    type="submit"
+                    class="inline-flex rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
+                    title="Запросить отмену уже активной задачи"
+                  >
+                    Отменить
+                  </button>
+                </form>
+                {% endif %}
+
+                <form method="post" action="/admin/broadcasts/">
+                  <input type="hidden" name="action" value="clone">
+                  <input type="hidden" name="job_id" value="{{ row.id }}">
+                  <input type="hidden" name="status" value="draft">
+                  <button
+                    type="submit"
+                    class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+                    title="Создать черновик-копию этой задачи"
+                  >
+                    Клонировать
+                  </button>
+                </form>
+
+                {% if not row.is_editable and not row.can_request_cancel %}
+                <div class="rounded-2xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-500">
+                  Для этого статуса доступны только просмотр и клонирование.
+                </div>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7" class="px-6 py-8 text-center text-sm text-slate-400">
+              {% if status_filter != 'all' %}
+              По выбранному фильтру задачи рассылки не найдены.
+              {% else %}
+              Задач рассылки пока нет.
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if has_prev or has_next %}
+    <div class="flex items-center justify-between border-t border-slate-800 px-6 py-5">
+      <div class="text-sm text-slate-400">
+        Страница {{ page }}
+      </div>
+
+      <div class="flex gap-3">
+        {% if has_prev %}
+        <a
+          href="/admin/broadcasts/?page={{ page - 1 }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}"
+          class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+          title="Перейти на предыдущую страницу"
+        >
+          ← Назад
+        </a>
+        {% endif %}
+
+        {% if has_next %}
+        <a
+          href="/admin/broadcasts/?page={{ page + 1 }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}"
+          class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+          title="Перейти на следующую страницу"
+        >
+          Вперёд →
+        </a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function () {
+  const runAtInput = document.getElementById('broadcast-run-at');
+
+  function toDatetimeLocalValue(date) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return [
+      date.getFullYear(),
+      '-',
+      pad(date.getMonth() + 1),
+      '-',
+      pad(date.getDate()),
+      'T',
+      pad(date.getHours()),
+      ':',
+      pad(date.getMinutes()),
+    ].join('');
+  }
+
+  function setMinutesFromNow(minutes) {
+    if (!runAtInput) return;
+    const now = new Date();
+    now.setSeconds(0, 0);
+    now.setMinutes(now.getMinutes() + minutes);
+    runAtInput.value = toDatetimeLocalValue(now);
+  }
+
+  function setTomorrowAt(hour) {
+    if (!runAtInput) return;
+    const dt = new Date();
+    dt.setDate(dt.getDate() + 1);
+    dt.setHours(hour, 0, 0, 0);
+    runAtInput.value = toDatetimeLocalValue(dt);
+  }
+
+  document.querySelectorAll('.broadcast-quick-fill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const minutes = parseInt(btn.dataset.offsetMinutes || '0', 10);
+      if (!Number.isNaN(minutes) && minutes > 0) {
+        setMinutesFromNow(minutes);
+      }
+    });
+  });
+
+  document.querySelectorAll('.broadcast-tomorrow-fill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const hour = parseInt(btn.dataset.tomorrowHour || '10', 10);
+      if (!Number.isNaN(hour)) {
+        setTomorrowAt(hour);
+      }
+    });
+  });
+
+  const clearBtn = document.getElementById('broadcast-clear-run-at');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      if (runAtInput) runAtInput.value = '';
+    });
+  }
+
+  const keyboardField = document.querySelector('textarea[name="keyboard_json"]');
+  const fillKeyboardBtn = document.getElementById('broadcast-fill-keyboard-sample');
+  const clearKeyboardBtn = document.getElementById('broadcast-clear-keyboard');
+
+  if (fillKeyboardBtn && keyboardField) {
+    fillKeyboardBtn.addEventListener('click', () => {
+      keyboardField.value = JSON.stringify([
+        [{ text: 'Открыть сайт', url: 'https://example.com' }],
+        [{ text: 'Поддержка', callback_data: 'support:open' }],
+      ], null, 2);
+    });
+  }
+
+  if (clearKeyboardBtn && keyboardField) {
+    clearKeyboardBtn.addEventListener('click', () => {
+      keyboardField.value = '';
+    });
+  }
+})();
+</script>
+{% endblock %}

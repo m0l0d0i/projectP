@@ -1,0 +1,14 @@
+services:
+  postgres_test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vpn_bot_test
+      POSTGRES_USER: vpn_user
+      POSTGRES_PASSWORD: test_password
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpn_user -d vpn_bot_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

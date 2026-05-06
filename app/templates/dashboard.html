@@ -1,0 +1,499 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {% if current_page == "search" %}
+    Глобальный поиск
+  {% else %}
+    Система
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% set support_status = (app_settings.support_chat_test_last_status if app_settings is defined and app_settings else 'never') %}
+{% set support_badge_class =
+  'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+  if support_status == 'ok'
+  else 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+  if support_status in ['never', 'degraded']
+  else 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+%}
+
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="flex items-center gap-2">
+        <h1 class="text-3xl font-bold text-white">
+          {% if current_page == "search" %}
+            Глобальный поиск
+          {% else %}
+            Система
+          {% endif %}
+        </h1>
+        <span
+          class="help-dot"
+          tabindex="0"
+          data-tooltip="{% if current_page == 'search' %}Поиск помогает быстро найти пользователя, счёт или тикет по идентификатору, username или service_id.{% else %}Раздел показывает оперативную сводку по проекту, интеграциям и быстрые ссылки на ключевые зоны web-admin.{% endif %}"
+          aria-label="Справка по разделу"
+        >?</span>
+      </div>
+      <p class="mt-2 text-slate-400">
+        {% if current_page == "search" %}
+          Результаты быстрого поиска по пользователям, счетам и тикетам.
+        {% else %}
+          Операционная сводка по проекту, состояние интеграций и быстрый доступ к ключевым разделам панели.
+        {% endif %}
+      </p>
+      {% if current_page != "search" %}
+        <p class="mt-3 text-xs text-slate-500">
+          Web-admin работает в режиме local-only и должен открываться через SSH-туннель.
+        </p>
+      {% endif %}
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a href="/admin/system/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🖥 Система</a>
+      <a href="/admin/users/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">👤 Пользователи</a>
+      <a href="/admin/people/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">👥 Люди и уведомления</a>
+      <a href="/admin/pricing/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">💸 Тарифы и цены</a>
+      <a href="/admin/trial/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🎁 Тестовая подписка</a>
+      <a href="/admin/tickets/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🎫 Тикеты поддержки</a>
+      <a href="/admin/antispam/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🛡 Антиспам</a>
+      <a href="/admin/rules/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">📜 Правила сервиса</a>
+      <a href="/admin/broadcasts/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">📣 Рассылки</a>
+      <a href="/admin/promocodes/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🎟 Промокоды</a>
+      <a href="/admin/invoices/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🧾 Счета и платежи</a>
+      <a href="/admin/marzban-page/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🌐 Страница подписки Marzban</a>
+      <a href="/admin/marzban-ops/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🛠 Операции Marzban</a>
+      <a href="/admin/nodes/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🧭 Узлы</a>
+      <a href="/admin/routing-profiles/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🧩 Профили маршрутизации</a>
+      <a href="/admin/links/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">🔗 Ссылки приложений</a>
+    </div>
+  </div>
+
+  {% if success_message %}
+    <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+      ✅ {{ success_message }}
+    </div>
+  {% endif %}
+
+  {% if error_message %}
+    <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+      ❌ {{ error_message }}
+    </div>
+  {% endif %}
+
+  {% if current_page != "search" %}
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-xl font-semibold text-white">Разделы админки</h2>
+            <span class="help-dot" tabindex="0" data-tooltip="Карточки ниже ведут в основные разделы панели. Используйте их как быстрый старт для ежедневных операций и диагностики." aria-label="Справка по разделам">?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">
+            Быстрый переход к ключевым настройкам, инфраструктуре и операционным разделам.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <a href="/admin/users/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">👤 Пользователи</div>
+          <div class="mt-2 text-sm text-slate-400">Список пользователей, поиск, пагинация и быстрый переход в карточку.</div>
+        </a>
+
+        <a href="/admin/pricing/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">💸 Тарифы и цены</div>
+          <div class="mt-2 text-sm text-slate-400">Конструктор тарифов, правила ценообразования и превью расчётов.</div>
+        </a>
+
+        <a href="/admin/trial/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🎁 Тестовая подписка</div>
+          <div class="mt-2 text-sm text-slate-400">Срок, трафик и количество устройств для тестового доступа.</div>
+        </a>
+
+        <a href="/admin/tickets/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🎫 Тикеты поддержки</div>
+          <div class="mt-2 text-sm text-slate-400">Очередь обращений, история сообщений и закрытие заявок.</div>
+        </a>
+
+        <a href="/admin/antispam/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🛡 Антиспам</div>
+          <div class="mt-2 text-sm text-slate-400">Лимиты сообщений, callback-лимиты и блокировки.</div>
+        </a>
+
+        <a href="/admin/rules/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">📜 Правила сервиса</div>
+          <div class="mt-2 text-sm text-slate-400">Ссылки на правила, оферту и политику конфиденциальности.</div>
+        </a>
+
+        <a href="/admin/broadcasts/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">📣 Рассылки</div>
+          <div class="mt-2 text-sm text-slate-400">Черновики, отложенный запуск, фото и inline-кнопки.</div>
+        </a>
+
+        <a href="/admin/promocodes/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🎟 Промокоды</div>
+          <div class="mt-2 text-sm text-slate-400">Управление бонусами, сроками действия и архивом кодов.</div>
+        </a>
+
+        <a href="/admin/people/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">👥 Люди и уведомления</div>
+          <div class="mt-2 text-sm text-slate-400">Администраторы, служебные уведомления и чат поддержки.</div>
+        </a>
+
+        <a href="/admin/invoices/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🧾 Счета и платежи</div>
+          <div class="mt-2 text-sm text-slate-400">Диагностика счетов, статусы провайдера и ручная проверка оплаты.</div>
+        </a>
+
+        <a href="/admin/marzban-page/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🌐 Страница подписки Marzban</div>
+          <div class="mt-2 text-sm text-slate-400">Управление live-страницей /sub/&lt;token&gt; и allowlisted env-настройками.</div>
+        </a>
+
+        <a href="/admin/marzban-ops/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🛠 Операции Marzban</div>
+          <div class="mt-2 text-sm text-slate-400">Geodata, эксплуатационные действия и сервисные операции для Marzban/Xray.</div>
+        </a>
+
+        <a href="/admin/nodes/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🧭 Узлы</div>
+          <div class="mt-2 text-sm text-slate-400">Реестр узлов, синхронизация с Marzban и состояние health/sync.</div>
+        </a>
+
+        <a href="/admin/routing-profiles/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🧩 Профили маршрутизации</div>
+          <div class="mt-2 text-sm text-slate-400">Dry-run выбора узла, preview Xray fragment и проверка restart-потока.</div>
+        </a>
+
+        <a href="/admin/links/" class="rounded-2xl border border-slate-800 bg-slate-950 p-5 transition hover:border-cyan-500 hover:bg-slate-900">
+          <div class="text-sm font-semibold text-white">🔗 Ссылки приложений</div>
+          <div class="mt-2 text-sm text-slate-400">Публичные ссылки на приложения и инструкции по платформам.</div>
+        </a>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="grid gap-4 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl xl:col-span-3">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-semibold text-white">Быстрый поиск</h2>
+            <span class="help-dot" tabindex="0" data-tooltip="Можно искать по tg_id, username, service_id, ticket_id, invoice_id и другим служебным идентификаторам, которые уже есть в панели." aria-label="Справка по поиску">?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">Поиск по tg_id, username, service_id, ticket_id и invoice_id.</p>
+        </div>
+      </div>
+
+      <form method="get" action="/admin/search" class="mt-4 flex flex-col gap-3 md:flex-row">
+        <input
+          type="text"
+          name="q"
+          value="{{ query if query is defined else '' }}"
+          placeholder="Например: 123456789, username, service_id"
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+        >
+        <button
+          type="submit"
+          class="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+        >
+          Найти
+        </button>
+      </form>
+
+      <div class="mt-4 flex flex-wrap gap-3 text-xs">
+        <a href="/admin/export/users.csv" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-300 hover:border-cyan-500 hover:text-white">⬇️ Экспорт пользователей (CSV)</a>
+        <a href="/admin/export/tickets.csv" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-300 hover:border-cyan-500 hover:text-white">⬇️ Экспорт тикетов (CSV)</a>
+        <a href="/admin/export/invoices.csv" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-300 hover:border-cyan-500 hover:text-white">⬇️ Экспорт счетов (CSV)</a>
+        <a href="/admin/export/broadcasts.csv" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-300 hover:border-cyan-500 hover:text-white">⬇️ Экспорт рассылок (CSV)</a>
+      </div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-semibold text-white">Чат поддержки</h2>
+            <span class="help-dot" tabindex="0" data-tooltip="Проверка отправляет тестовое сообщение в настроенный чат поддержки. Используйте её после изменения chat_id или прав бота." aria-label="Справка по чату поддержки">?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">Быстрая проверка доставки в чат поддержки.</p>
+        </div>
+        <span class="rounded-full border px-2 py-1 text-xs font-semibold uppercase tracking-wide {{ support_badge_class }}">
+          {{ support_status }}
+        </span>
+      </div>
+
+      <form method="post" action="/admin/people/test-support-chat" class="mt-4">
+        <button
+          type="submit"
+          class="inline-flex w-full items-center justify-center rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-white"
+        >
+          Проверить чат поддержки
+        </button>
+      </form>
+
+      {% if app_settings is defined and app_settings %}
+        <div class="mt-4 rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Последний статус</div>
+          <div class="mt-2 text-sm text-white">{{ app_settings.support_chat_test_last_status or "never" }}</div>
+          <div class="mt-2 text-xs break-words text-slate-400">{{ app_settings.support_chat_test_last_error or "—" }}</div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if counts is defined and counts %}
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="flex items-center gap-2 text-sm text-slate-400">
+              <span>Пользователи</span>
+              <span class="help-dot" tabindex="0" data-tooltip="Общее количество пользователей в базе. Карточка ведёт в полный список пользователей." aria-label="Справка по пользователям">?</span>
+            </div>
+            <div class="mt-2 text-3xl font-bold text-white">{{ counts.users_total or 0 }}</div>
+          </div>
+          <a
+            href="/admin/users/"
+            class="inline-flex rounded-xl bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400"
+          >
+            Открыть
+          </a>
+        </div>
+      </div>
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+        <div class="flex items-center gap-2 text-sm text-slate-400">
+          <span>Тикеты поддержки</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Показывает общее число тикетов и отдельно количество активных обращений, которые ещё не закрыты." aria-label="Справка по тикетам">?</span>
+        </div>
+        <div class="mt-2 text-3xl font-bold text-white">{{ counts.tickets_total or 0 }}</div>
+        <div class="mt-2 text-xs text-slate-500">Активных: {{ counts.tickets_open or 0 }}</div>
+      </div>
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+        <div class="flex items-center gap-2 text-sm text-slate-400">
+          <span>Счета</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Общее количество созданных счетов. Для диагностики и ручной проверки используйте раздел «Счета и платежи»." aria-label="Справка по счетам">?</span>
+        </div>
+        <div class="mt-2 text-3xl font-bold text-white">{{ counts.invoices_total or 0 }}</div>
+      </div>
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+        <div class="flex items-center gap-2 text-sm text-slate-400">
+          <span>Рассылки</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Показывает общее число задач рассылок и отдельно число не завершённых задач, которые ещё ожидают отправки или выполняются." aria-label="Справка по рассылкам">?</span>
+        </div>
+        <div class="mt-2 text-3xl font-bold text-white">{{ counts.broadcasts_total or 0 }}</div>
+        <div class="mt-2 text-xs text-slate-500">Активных: {{ counts.broadcasts_active or 0 }}</div>
+      </div>
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+        <div class="flex items-center gap-2 text-sm text-slate-400">
+          <span>Промокоды</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Количество промокодов в системе. Полное управление, фильтры и архив доступны в разделе промокодов." aria-label="Справка по промокодам">?</span>
+        </div>
+        <div class="mt-2 text-3xl font-bold text-white">{{ counts.promocodes_total or 0 }}</div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if health is defined and health %}
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-xl font-semibold text-white">Состояние системы</h2>
+            <span class="help-dot" tabindex="0" data-tooltip="Проверки показывают оперативное состояние ключевых компонентов backend и внешних интеграций. FAIL означает, что компонент требует внимания администратора." aria-label="Справка по состоянию системы">?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">Состояние основных компонентов backend и интеграций.</p>
+        </div>
+      </div>
+
+      <div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {% for health_name, item in health.items() %}
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="flex items-center justify-between gap-3">
+              <div class="text-sm font-semibold capitalize text-white">{{ health_name }}</div>
+              {% if item.ok %}
+                <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">OK</span>
+              {% else %}
+                <span class="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300">FAIL</span>
+              {% endif %}
+            </div>
+            <div class="mt-3 break-words whitespace-pre-line text-sm text-slate-300">{{ item.message }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% if search_invoice is defined and search_invoice %}
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">Найденный счёт</h2>
+      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">ID счёта</div>
+          <div class="mt-2 text-white">{{ search_invoice.id }}</div>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">ID пользователя</div>
+          <div class="mt-2 text-white">{{ search_invoice.user_id }}</div>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Статус</div>
+          <div class="mt-2 text-white">{{ search_invoice.status.value if search_invoice.status else "—" }}</div>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Сумма</div>
+          <div class="mt-2 text-white">{{ search_invoice.amount }}</div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if search_ticket is defined and search_ticket %}
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">Найденный тикет</h2>
+      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">ID тикета</div>
+          <div class="mt-2 text-white">{{ search_ticket.id }}</div>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">ID пользователя</div>
+          <div class="mt-2 text-white">{{ search_ticket.user_id }}</div>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Статус</div>
+          <div class="mt-2 text-white">{{ search_ticket.status.value if search_ticket.status else "—" }}</div>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="text-xs uppercase tracking-wider text-slate-500">Открыть</div>
+          <div class="mt-2">
+            <a href="/admin/tickets/{{ search_ticket.id }}" class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Перейти</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
+    <div class="flex items-center justify-between gap-4 border-b border-slate-800 px-6 py-5">
+      <div>
+        <div class="flex items-center gap-2">
+          <h2 class="text-xl font-semibold text-white">
+            {% if current_page == "search" %}
+              Результаты по пользователям
+            {% else %}
+              Последние пользователи
+            {% endif %}
+          </h2>
+          <span class="help-dot" tabindex="0" data-tooltip="Таблица показывает последние карточки пользователей или результаты глобального поиска. Отсюда можно быстро перейти в детальную карточку пользователя." aria-label="Справка по пользователям">?</span>
+        </div>
+        <p class="mt-1 text-sm text-slate-400">
+          {% if current_page == "search" %}
+            Совпадения по tg_id, username, имени, фамилии или service_id.
+          {% else %}
+            Быстрый доступ к карточкам пользователей и их услугам.
+          {% endif %}
+        </p>
+      </div>
+
+      <a
+        href="/admin/users/"
+        class="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+      >
+        Все пользователи
+      </a>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800">
+        <thead class="bg-slate-900">
+          <tr>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Telegram ID</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Пользователь</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Баланс</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Создан</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Действие</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% if users is defined and users %}
+            {% for user in users %}
+              <tr class="hover:bg-slate-800/40">
+                <td class="px-6 py-4 text-sm text-white">{{ user.id }}</td>
+                <td class="px-6 py-4 text-sm text-slate-300">{{ user.tg_id }}</td>
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  <div class="font-medium text-white">
+                    {% if user.username %}
+                      @{{ user.username }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </div>
+                  <div class="mt-1 text-xs text-slate-500">
+                    {{ user.first_name or "" }}{% if user.first_name and user.last_name %} {% endif %}{{ user.last_name or "" }}
+                  </div>
+                </td>
+                <td class="px-6 py-4 text-sm text-slate-300">{{ user.balance }}</td>
+                <td class="px-6 py-4 text-sm text-slate-300">{{ user.created_at or "—" }}</td>
+                <td class="px-6 py-4">
+                  <a href="/admin/users/{{ user.id }}" class="inline-flex rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Открыть</a>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="6" class="px-6 py-8 text-center text-sm text-slate-400">
+                Пользователи не найдены.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if recent_audit is defined and recent_audit %}
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-xl font-semibold text-white">Последние audit-события</h2>
+            <span class="help-dot" tabindex="0" data-tooltip="Показывает недавние административные и системные действия. Используйте блок для быстрой проверки, что важные apply- или manual-операции действительно были выполнены." aria-label="Справка по audit">?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">Недавние административные и системные действия.</p>
+        </div>
+      </div>
+
+      <div class="mt-5 space-y-3">
+        {% for row in recent_audit %}
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div class="text-sm font-semibold text-white">
+                  {{ row.action.value if row.action else "unknown_action" }}
+                </div>
+                <div class="mt-1 text-xs text-slate-500">
+                  {{ row.entity_type }} / {{ row.entity_id }}
+                </div>
+              </div>
+              <div class="text-xs text-slate-500">
+                {{ row.created_at.strftime("%Y-%m-%d %H:%M UTC") if row.created_at else "—" }}
+              </div>
+            </div>
+            <div class="mt-3 break-words text-sm text-slate-300">
+              {% if row.details %}
+                <pre class="whitespace-pre-wrap break-words text-xs text-slate-400">{{ row.details }}</pre>
+              {% else %}
+                —
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

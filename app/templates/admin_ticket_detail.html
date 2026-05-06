@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+
+{% block title %}Тикет поддержки #{{ ticket.id }}{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <div class="flex flex-wrap items-center gap-3 text-sm text-slate-400">
+        <a href="/admin/system/" class="text-cyan-300 hover:text-cyan-200">Главная</a>
+        <span class="text-slate-600">/</span>
+        <a href="/admin/tickets/" class="text-cyan-300 hover:text-cyan-200">Тикеты поддержки</a>
+        <span class="text-slate-600">/</span>
+        <span class="text-slate-500">#{{ ticket.id }}</span>
+      </div>
+      <div class="mt-4 flex flex-wrap items-center gap-3">
+        <h1 class="text-3xl font-bold text-white">Тикет поддержки #{{ ticket.id }}</h1>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Здесь собрана полная история переписки, служебные поля аудита и действия администратора по закрытию обращения."
+          aria-label="Подсказка по карточке тикета"
+        >?</button>
+      </div>
+      <p class="mt-2 text-slate-400">
+        Детальная история обращения, текущее состояние диалога и служебные данные для поддержки.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Web-admin работает в local-only режиме и должен открываться через SSH-туннель.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/tickets/"
+        class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        title="Вернуться к общему списку тикетов поддержки"
+      >
+        ← К списку тикетов
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-1">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Статус</span>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Показывает текущее состояние диалога: ждём оператора, ждём пользователя или тикет уже закрыт."
+          aria-label="Подсказка по статусу тикета"
+        >?</button>
+      </div>
+      <div class="mt-3">
+        {% if ticket_status_tone == 'warning' %}
+          <span class="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-sm font-semibold text-amber-300">
+            {{ ticket_status_label }}
+          </span>
+        {% elif ticket_status_tone == 'info' %}
+          <span class="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-sm font-semibold text-cyan-300">
+            {{ ticket_status_label }}
+          </span>
+        {% elif ticket_status_tone == 'success' %}
+          <span class="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-sm font-semibold text-emerald-300">
+            {{ ticket_status_label }}
+          </span>
+        {% else %}
+          <span class="inline-flex rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-sm font-semibold text-slate-200">
+            {{ ticket_status_label }}
+          </span>
+        {% endif %}
+      </div>
+      <div class="mt-3 text-xs text-slate-500">
+        {% if ticket.status.value == 'waiting_operator' %}
+          Сейчас ход поддержки.
+        {% elif ticket.status.value == 'waiting_user' %}
+          Поддержка уже ответила, ожидается пользователь.
+        {% else %}
+          Диалог завершён и доступен только для истории.
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-1">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Последний автор</span>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Последний участник, который отправил сообщение или закрыл тикет. Полезно для понимания, чей сейчас ход."
+          aria-label="Подсказка по последнему автору"
+        >?</button>
+      </div>
+      <div class="mt-3 text-sm font-semibold text-white">{{ ticket_last_actor_label or 'Не зафиксирован' }}</div>
+      <div class="mt-2 text-xs text-slate-500">
+        {% if ticket.last_actor_tg_id %}
+          tg_id={{ ticket.last_actor_tg_id }}
+        {% else %}
+          Автор последнего действия ещё не зафиксирован.
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-1">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Пользователь</span>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Пользователь, к которому относится тикет. Отсюда можно быстро перейти в его карточку."
+          aria-label="Подсказка по пользователю"
+        >?</button>
+      </div>
+      <div class="mt-3 text-sm font-semibold text-white">
+        {% if ticket_user %}
+          ID={{ ticket_user.id }} / TG={{ ticket_user.tg_id }}
+        {% else %}
+          user_id={{ ticket.user_id }}
+        {% endif %}
+      </div>
+      {% if ticket_user %}
+      <div class="mt-2 text-xs text-slate-400">
+        {% if ticket_user.username %}@{{ ticket_user.username }}{% else %}Username не указан{% endif %}
+      </div>
+      {% if ticket_user.first_name or ticket_user.last_name %}
+      <div class="mt-1 text-xs text-slate-500">
+        {{ (ticket_user.first_name or '') ~ (' ' if ticket_user.first_name and ticket_user.last_name else '') ~ (ticket_user.last_name or '') }}
+      </div>
+      {% else %}
+      <div class="mt-1 text-xs text-slate-500">Имя не заполнено</div>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-1">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Создан</span>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Время создания тикета в базе. Формат времени в админке отображается в UTC."
+          aria-label="Подсказка по времени создания"
+        >?</button>
+      </div>
+      <div class="mt-3 text-sm font-semibold text-white">
+        {{ ticket.created_at.strftime("%Y-%m-%d %H:%M UTC") if ticket.created_at else 'Не указано' }}
+      </div>
+      <div class="mt-2 text-xs text-slate-500">
+        {% if has_admin_reply %}
+          Поддержка уже отвечала в этом тикете.
+        {% else %}
+          Ответа поддержки пока нет.
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-1">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Последняя активность</span>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Последнее сообщение или системное действие по тикету. Помогает отслеживать, не завис ли диалог."
+          aria-label="Подсказка по последней активности"
+        >?</button>
+      </div>
+      <div class="mt-3 text-sm font-semibold text-white">
+        {{ last_message_at.strftime("%Y-%m-%d %H:%M UTC") if last_message_at else 'Не указано' }}
+      </div>
+      <div class="mt-2 text-xs text-slate-500">
+        {% if ticket.closed_at %}
+          Закрыт: {{ ticket.closed_at.strftime("%Y-%m-%d %H:%M UTC") }}
+        {% else %}
+          Тикет пока активен.
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-1">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+        <span>Закрытие</span>
+        <button
+          type="button"
+          class="help-dot"
+          data-tooltip="Показывает, кто закрыл тикет, и есть ли у закрытия админская причина для аудита."
+          aria-label="Подсказка по закрытию тикета"
+        >?</button>
+      </div>
+      <div class="mt-3 text-sm font-semibold text-white">
+        {{ ticket_closed_by_label or 'Не закрыт' }}
+      </div>
+      <div class="mt-2 text-xs text-slate-500">
+        {% if ticket_close_reason %}
+          Причина сохранена.
+        {% elif ticket.status.value == 'closed' %}
+          Причина не указана.
+        {% else %}
+          Тикет ещё не закрыт.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-3">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-2">
+      <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold text-white">История сообщений</h2>
+            <button
+              type="button"
+              class="help-dot"
+              data-tooltip="Полная лента переписки по тикету. Здесь показываются и обычные сообщения, и служебные метаданные вложений."
+              aria-label="Подсказка по истории сообщений"
+            >?</button>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">
+            Полная лента переписки по тикету, включая текст и вложения.
+          </p>
+        </div>
+        <div class="text-xs text-slate-500" title="Количество сообщений в этом тикете">
+          Всего сообщений: {{ messages|length }}
+        </div>
+      </div>
+
+      <div class="mt-6 space-y-4">
+        {% for message in messages %}
+        <div class="rounded-3xl border {% if message.sender_type.value == 'user' %}border-emerald-500/20 bg-emerald-500/5{% else %}border-cyan-500/20 bg-cyan-500/5{% endif %} p-5 shadow-lg">
+          <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div class="flex flex-wrap items-center gap-2">
+              {% if message.sender_type.value == 'user' %}
+                <span class="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+                  Пользователь
+                </span>
+              {% else %}
+                <span class="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-300">
+                  Поддержка
+                </span>
+              {% endif %}
+
+              <span class="text-xs text-slate-500" title="Telegram ID отправителя сообщения">
+                sender_tg_id={{ message.sender_tg_id }}
+              </span>
+
+              {% if message.media_type %}
+              <span class="inline-flex rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300" title="Тип вложения в этом сообщении">
+                {{ message.media_type }}
+              </span>
+              {% endif %}
+            </div>
+
+            <div class="text-xs text-slate-500" title="Время отправки сообщения в UTC">
+              {{ message.created_at.strftime("%Y-%m-%d %H:%M UTC") if message.created_at else 'Не указано' }}
+            </div>
+          </div>
+
+          <div class="mt-4 space-y-4">
+            <div>
+              <div class="mb-2 flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+                <span>Текст сообщения</span>
+                <button
+                  type="button"
+                  class="help-dot"
+                  data-tooltip="Если сообщение было только с вложением, текст может быть пустым. Это нормальное поведение support-flow."
+                  aria-label="Подсказка по тексту сообщения"
+                >?</button>
+              </div>
+              <div class="whitespace-pre-wrap break-words rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-200">
+                {{ message.text or 'Текст не указан' }}
+              </div>
+            </div>
+
+            {% if message.media_type or message.media_file_id or message.media_file_unique_id or message.media_file_name or message.media_mime_type or message.media_size_bytes or message.admin_chat_message_id %}
+            <div>
+              <div class="mb-3 flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
+                <span>Метаданные вложения</span>
+                <button
+                  type="button"
+                  class="help-dot"
+                  data-tooltip="Служебные поля нужны для диагностики пересылки вложений между пользователем и support chat."
+                  aria-label="Подсказка по метаданным вложения"
+                >?</button>
+              </div>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">Тип вложения</div>
+                  <div class="mt-2 text-sm text-white">{{ message.media_type or 'Не задан' }}</div>
+                </div>
+
+                <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">media_file_id</div>
+                  <div class="mt-2 break-all text-sm text-white">{{ message.media_file_id or 'Не задан' }}</div>
+                </div>
+
+                <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">media_file_unique_id</div>
+                  <div class="mt-2 break-all text-sm text-white">{{ message.media_file_unique_id or 'Не задан' }}</div>
+                </div>
+
+                <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">Имя файла</div>
+                  <div class="mt-2 break-all text-sm text-white">{{ message.media_file_name or 'Не задано' }}</div>
+                </div>
+
+                <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">MIME</div>
+                  <div class="mt-2 break-all text-sm text-white">{{ message.media_mime_type or 'Не задан' }}</div>
+                </div>
+
+                <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">Размер / admin_chat_message_id</div>
+                  <div class="mt-2 text-sm text-white">
+                    {% if message.media_size_bytes is not none %}{{ message.media_size_bytes }} байт{% else %}Размер не указан{% endif %}
+                    {% if message.admin_chat_message_id %}
+                      <div class="mt-1 text-xs text-slate-500">admin_chat_message_id={{ message.admin_chat_message_id }}</div>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 px-6 py-8 text-center text-sm text-slate-400">
+          Сообщений по этому тикету пока нет.
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="space-y-6 xl:col-span-1">
+      {% if ticket_user %}
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="flex items-center gap-2">
+          <h2 class="text-xl font-semibold text-white">Карточка пользователя</h2>
+          <button
+            type="button"
+            class="help-dot"
+            data-tooltip="Быстрый переход к профилю пользователя, связанному с этим обращением."
+            aria-label="Подсказка по карточке пользователя"
+          >?</button>
+        </div>
+        <p class="mt-2 text-sm text-slate-400">
+          Быстрый переход к пользователю, связанному с этим обращением.
+        </p>
+
+        <div class="mt-5 space-y-3 rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-500">Профиль</div>
+            <div class="mt-2 text-sm text-white">ID={{ ticket_user.id }}</div>
+          </div>
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-500">Telegram</div>
+            <div class="mt-2 text-sm text-white">{{ ticket_user.tg_id }}</div>
+          </div>
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-500">Username</div>
+            <div class="mt-2 text-sm text-white">{% if ticket_user.username %}@{{ ticket_user.username }}{% else %}Не задан{% endif %}</div>
+          </div>
+        </div>
+
+        <a
+          href="/admin/users/{{ ticket_user.id }}"
+          class="mt-5 inline-flex w-full items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+          title="Открыть карточку пользователя"
+        >
+          Открыть пользователя
+        </a>
+      </div>
+      {% endif %}
+
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="flex items-center gap-2">
+          <h2 class="text-xl font-semibold text-white">Служебная информация</h2>
+          <button
+            type="button"
+            class="help-dot"
+            data-tooltip="Поля для аудита и диагностики support-flow. Эти значения помогают разбирать спорные случаи и повторные закрытия."
+            aria-label="Подсказка по служебной информации"
+          >?</button>
+        </div>
+        <p class="mt-2 text-sm text-slate-400">
+          Поля для аудита и диагностики support-flow.
+        </p>
+
+        <div class="mt-5 space-y-3">
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Хэштег тикета</div>
+            <div class="mt-2 text-sm text-white">{{ ticket.hashtag }}</div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Последний актор</div>
+            <div class="mt-2 text-sm text-white">{{ ticket_last_actor_label or 'Не зафиксирован' }}</div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Кто закрыл</div>
+            <div class="mt-2 text-sm text-white">{{ ticket_closed_by_label or 'Не закрыт' }}</div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Причина закрытия</div>
+            <div class="mt-2 whitespace-pre-wrap break-words text-sm text-white">{{ ticket_close_reason or 'Не указана' }}</div>
+          </div>
+        </div>
+      </div>
+
+      {% if ticket.status.value != 'closed' %}
+      <div class="rounded-3xl border border-rose-500/20 bg-rose-500/5 p-6 shadow-xl">
+        <div class="flex items-center gap-2">
+          <h2 class="text-xl font-semibold text-white">Закрыть тикет</h2>
+          <button
+            type="button"
+            class="help-dot"
+            data-tooltip="Закрытие переводит тикет в статус closed. Причина сохраняется только для администратора и аудита."
+            aria-label="Подсказка по закрытию тикета"
+          >?</button>
+        </div>
+        <p class="mt-2 text-sm text-slate-300">
+          Закрытие выполняется через единую business-логику: статус станет <span class="font-semibold text-rose-300">closed</span>, а причина сохранится только для админского аудита.
+        </p>
+
+        <form method="post" action="/admin/tickets/{{ ticket.id }}/close" class="mt-5 space-y-4" onsubmit="return confirm('Закрыть тикет #{{ ticket.id }}?');">
+          <div>
+            <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+              <span>Причина закрытия (только для админа)</span>
+              <button
+                type="button"
+                class="help-dot"
+                data-tooltip="Пользователь не увидит эту причину. Она нужна для внутреннего аудита и разбора спорных кейсов."
+                aria-label="Подсказка по причине закрытия"
+              >?</button>
+            </label>
+            <textarea
+              name="close_reason"
+              rows="4"
+              placeholder="Например: вопрос решён, дублирующий тикет, неактуально"
+              class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-rose-500"
+            ></textarea>
+          </div>
+
+          <button
+            type="submit"
+            class="inline-flex w-full items-center justify-center rounded-2xl bg-rose-500 px-5 py-3 text-sm font-semibold text-white hover:bg-rose-400"
+            title="Закрыть тикет и сохранить причину в админском аудите"
+          >
+            Закрыть тикет
+          </button>
+        </form>
+      </div>
+      {% else %}
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="flex items-center gap-2">
+          <h2 class="text-xl font-semibold text-white">Тикет уже закрыт</h2>
+          <button
+            type="button"
+            class="help-dot"
+            data-tooltip="Повторное закрытие не допускается. История обращения остаётся доступной только для просмотра и аудита."
+            aria-label="Подсказка по закрытому тикету"
+          >?</button>
+        </div>
+        <p class="mt-2 text-sm text-slate-400">
+          Повторное закрытие недоступно. История обращения сохранена для аудита и разбора инцидентов.
+        </p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

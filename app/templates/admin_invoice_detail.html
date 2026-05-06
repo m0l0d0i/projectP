@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Счет #{{ invoice.id }}{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="flex flex-wrap items-center gap-3 text-sm">
+        <a href="/admin/system/" class="text-cyan-300 hover:text-cyan-200">← Главная</a>
+        <span class="text-slate-600">•</span>
+        <a href="/admin/invoices/" class="text-cyan-300 hover:text-cyan-200">Счета и платежи</a>
+      </div>
+      <h1 class="mt-4 text-3xl font-bold text-white">Счет #{{ invoice.id }}</h1>
+      <p class="mt-2 text-slate-400">Диагностика внутреннего счета, провайдера оплаты и аудита.</p>
+    </div>
+  </div>
+
+  {% if success_message %}<div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">✅ {{ success_message }}</div>{% endif %}
+  {% if error_message %}<div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">❌ {{ error_message }}</div>{% endif %}
+
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl"><div class="text-xs uppercase tracking-wider text-slate-500">User ID</div><div class="mt-2 text-lg font-semibold text-white">{{ invoice.user_id }}</div></div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl"><div class="text-xs uppercase tracking-wider text-slate-500">Назначение</div><div class="mt-2 text-lg font-semibold text-white">{{ invoice.purpose.value if invoice.purpose else '—' }}</div></div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl"><div class="text-xs uppercase tracking-wider text-slate-500">Статус</div><div class="mt-2 text-lg font-semibold text-white">{{ invoice.status.value if invoice.status else '—' }}</div></div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl"><div class="text-xs uppercase tracking-wider text-slate-500">Провайдер</div><div class="mt-2 text-lg font-semibold text-white">{{ invoice.provider or '—' }}</div></div>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-3">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-2">
+      <h2 class="text-xl font-semibold text-white">Детали счета</h2>
+      <div class="mt-5 grid gap-4 md:grid-cols-2">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">External ID</div><div class="mt-2 break-all text-sm text-white">{{ invoice.external_invoice_id or '—' }}</div></div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">Дата создания</div><div class="mt-2 text-sm text-white">{{ invoice.created_at }}</div></div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">Сумма</div><div class="mt-2 text-sm text-white">{{ invoice.amount }} {{ invoice.currency or '' }}</div></div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">К оплате</div><div class="mt-2 text-sm text-white">{{ invoice.payable_amount }} {{ invoice.currency or '' }}</div></div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">Списано с баланса</div><div class="mt-2 text-sm text-white">{{ invoice.balance_used }} {{ invoice.currency or '' }}</div></div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">Пользователь</div><div class="mt-2 text-sm text-white">{% if user %}#{{ user.id }} / {{ user.tg_id }}{% else %}—{% endif %}</div></div>
+      </div>
+
+      <div class="mt-6 flex flex-wrap gap-3">
+        <form method="post" action="/admin/invoices/{{ invoice.id }}/refresh"><input type="hidden" name="return_to" value="/admin/invoices/{{ invoice.id }}"><button type="submit" class="inline-flex rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Обновить статус у провайдера</button></form>
+        <form method="post" action="/admin/invoices/{{ invoice.id }}/approve"><input type="hidden" name="return_to" value="/admin/invoices/{{ invoice.id }}"><button type="submit" class="inline-flex rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400">Подтвердить вручную</button></form>
+        <form method="post" action="/admin/invoices/{{ invoice.id }}/cancel"><input type="hidden" name="return_to" value="/admin/invoices/{{ invoice.id }}"><button type="submit" class="inline-flex rounded-2xl bg-rose-500 px-5 py-3 text-sm font-semibold text-white hover:bg-rose-400">Отменить</button></form>
+      </div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">Диагностика провайдера</h2>
+      <div class="mt-5 space-y-4">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">Провайдер</div><div class="mt-2 text-sm text-white">{{ provider_diag.provider or '—' }}</div></div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">Статус</div><div class="mt-2 text-sm text-white">{{ provider_diag.raw_status or provider_diag.status or provider_diag.reason or '—' }}</div></div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4"><div class="text-xs uppercase tracking-wider text-slate-500">Payment URL</div><div class="mt-2 break-all text-sm text-white">{{ provider_diag.payment_url or invoice.payment_url or '—' }}</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <h2 class="text-xl font-semibold text-white">Audit</h2>
+    <div class="mt-5 space-y-3">
+      {% for row in audit_rows %}
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+        <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div class="text-sm font-semibold text-white">{{ row.action.value if row.action else 'unknown' }}</div>
+            <div class="mt-1 text-xs text-slate-500">{{ row.entity_type }} / {{ row.entity_id }}</div>
+          </div>
+          <div class="text-xs text-slate-500">{{ row.created_at }}</div>
+        </div>
+        <pre class="mt-3 whitespace-pre-wrap break-words text-xs text-slate-400">{{ row.details or '—' }}</pre>
+      </div>
+      {% else %}
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">Audit-записи для этого счета пока отсутствуют.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

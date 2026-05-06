@@ -1,0 +1,636 @@
+{% extends "base.html" %}
+
+{% block title %}Тарифы и ценообразование{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Тарифы и цены</div>
+      <h1 class="mt-4 flex items-center gap-2 text-3xl font-bold text-white">
+        <span>Тарифы и цены</span>
+        <span class="help-dot" data-tooltip="Здесь настраиваются глобальные правила расчёта и сами тарифы, которые использует конструктор покупки. Источником истины для новых продаж является тариф из базы данных и его snapshot в счёте.">?</span>
+      </h1>
+      <p class="mt-2 max-w-3xl text-slate-400">
+        Базовые правила ценообразования и полноценные тарифы, которыми управляет база данных.
+        Новые покупки должны идти по текущей конфигурации тарифа, а уже оплаченный период фиксируется в invoice snapshot.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Здесь не должно быть скрытых fallback-правил: тарифы управляются из web-admin,
+        архивируются вместо удаления и сохраняют историю использования.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/system/"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        title="Вернуться на главную страницу админки"
+      >
+        ← На главную
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-4 md:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
+        <span>Всего тарифов</span>
+        <span class="help-dot" data-tooltip="Общее число карточек тарифов, включая активные, неактивные и архивные.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ tariff_counts.all or 0 }}</div>
+    </div>
+    <div class="rounded-3xl border border-emerald-500/20 bg-emerald-500/5 p-5 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wide text-emerald-300/80">
+        <span>Активные</span>
+        <span class="help-dot" data-tooltip="Тарифы, которые доступны для использования и могут участвовать в новых продажах.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ tariff_counts.active or 0 }}</div>
+    </div>
+    <div class="rounded-3xl border border-amber-500/20 bg-amber-500/5 p-5 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wide text-amber-300/80">
+        <span>Неактивные</span>
+        <span class="help-dot" data-tooltip="Тарифы, которые не участвуют в новых продажах, но ещё не отправлены в архив.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ tariff_counts.inactive or 0 }}</div>
+    </div>
+    <div class="rounded-3xl border border-slate-700 bg-slate-900/70 p-5 shadow-xl">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+        <span>Архив</span>
+        <span class="help-dot" data-tooltip="Архивные тарифы не пропадают из истории и могут быть повторно активированы.">?</span>
+      </div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ tariff_counts.archived or 0 }}</div>
+    </div>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-3">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-2">
+      <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+            <span>Глобальные правила ценообразования</span>
+            <span class="help-dot" data-tooltip="Эти значения служат общими базовыми правилами и fallback для совместимости. Новые тарифы ниже должны по возможности быть самодостаточными и не зависеть от скрытых правил.">?</span>
+          </h2>
+          <p class="mt-2 text-sm text-slate-400">
+            Эти параметры используются как общие базовые правила и fallback для старых сценариев. Новые тарифы ниже должны быть самодостаточными.
+          </p>
+        </div>
+        <span class="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-300">
+          Глобальные правила
+        </span>
+      </div>
+
+      <form method="post" action="/admin/pricing/" class="mt-6 grid gap-4 md:grid-cols-2">
+        <input type="hidden" name="action" value="update_rules">
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Базовая цена</span>
+            <span class="help-dot" data-tooltip="Базовая стоимость, от которой строятся расчёты и preview. Для новых тарифов старайся задавать и собственную базовую цену.">?</span>
+          </label>
+          <input type="number" step="0.01" name="base_price" value="{{ pricing.base_price }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Базовый трафик, ГБ</span>
+            <span class="help-dot" data-tooltip="Базовый объём трафика, от которого может строиться pricing preview и fallback-логика старых сценариев.">?</span>
+          </label>
+          <input type="number" name="base_traffic_gb" value="{{ pricing.base_traffic_gb }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Шаг трафика, ГБ</span>
+            <span class="help-dot" data-tooltip="Шаг конструктора трафика по умолчанию. Не заменяет индивидуальные настройки конкретного тарифа.">?</span>
+          </label>
+          <input type="number" name="traffic_step_gb" value="{{ pricing.traffic_step_gb }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Цена шага трафика</span>
+            <span class="help-dot" data-tooltip="Доплата за один шаг трафика по умолчанию.">?</span>
+          </label>
+          <input type="number" step="0.01" name="traffic_step_price" value="{{ pricing.traffic_step_price }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Цена шага устройства</span>
+            <span class="help-dot" data-tooltip="Доплата за одно устройство по умолчанию.">?</span>
+          </label>
+          <input type="number" step="0.01" name="device_step_price" value="{{ pricing.device_step_price }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Цена безлимита устройств</span>
+            <span class="help-dot" data-tooltip="Базовая доплата за режим безлимитного количества устройств.">?</span>
+          </label>
+          <input type="number" step="0.01" name="unlimited_devices_price" value="{{ pricing.unlimited_devices_price }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Цена полного безлимита</span>
+            <span class="help-dot" data-tooltip="Глобальная цена полного безлимита, если такая модель используется старой логикой или preview.">?</span>
+          </label>
+          <input type="number" step="0.01" name="unlimited_combo_price" value="{{ pricing.unlimited_combo_price }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Максимальная скидка, %</span>
+            <span class="help-dot" data-tooltip="Верхний предел скидки для расчётов на несколько месяцев.">?</span>
+          </label>
+          <input type="number" step="0.01" name="max_discount_percent" value="{{ pricing.max_discount_percent }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Максимум месяцев</span>
+            <span class="help-dot" data-tooltip="Глобальный максимум срока подписки. У конкретного тарифа ниже можно указать допустимые периоды точнее.">?</span>
+          </label>
+          <input type="number" name="max_months" value="{{ pricing.max_months }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Минимальная сумма пополнения</span>
+            <span class="help-dot" data-tooltip="Минимальная сумма обычного пополнения баланса.">?</span>
+          </label>
+          <input type="number" step="0.01" name="min_topup_amount" value="{{ pricing.min_topup_amount }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div class="md:col-span-2 rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-400">
+          Эти правила не должны подменять содержимое конкретных тарифов. Для новых покупок источником истины становится сам тариф и его snapshot в счёте.
+        </div>
+
+        <div class="md:col-span-2">
+          <button type="submit" class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400" title="Сохранить глобальные правила расчёта стоимости">
+            Сохранить правила ценообразования
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+        <span>Предпросмотр</span>
+        <span class="help-dot" data-tooltip="Пример того, как текущие правила и тарифы будут выглядеть в корзине пользователя. Это не заменяет фактический snapshot счёта, но помогает визуально проверить логику.">?</span>
+      </h2>
+      <p class="mt-2 text-sm text-slate-400">
+        Как текущие правила и тарифы будут выглядеть в корзине пользователя.
+      </p>
+
+      <div class="mt-5 space-y-4">
+        {% for row in preview_rows %}
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+            <div class="flex items-center justify-between gap-3">
+              <div class="text-sm font-semibold text-white">{{ row.tariff_title }}</div>
+              {% if row.tariff_code == 'trial' %}
+                <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300">Тест</span>
+              {% else %}
+                <span class="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-300">{{ row.months }} мес.</span>
+              {% endif %}
+            </div>
+
+            {% if row.tariff_code == 'trial' %}
+              <div class="mt-3 text-sm text-slate-300">
+                Длительность: {{ row.trial_duration_days }} дн.<br>
+                Трафик: {{ row.trial_traffic_gb }} ГБ<br>
+                Устройства: {{ row.device_label }}
+              </div>
+            {% else %}
+              <div class="mt-3 text-sm text-slate-300">
+                Устройства: {{ row.device_label }}<br>
+                Месячная цена: {{ row.monthly_price }} ₽<br>
+                Сумма без скидки: {{ row.subtotal }} ₽<br>
+                Скидка: {{ row.discount_percent }}<br>
+                К оплате: <span class="font-semibold text-white">{{ row.payable }} ₽</span>
+              </div>
+            {% endif %}
+          </div>
+        {% else %}
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">
+            Предпросмотр пока недоступен.
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-2">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+            <span>{% if edit_tariff %}Редактирование тарифа{% else %}Создать тариф{% endif %}</span>
+            <span class="help-dot" data-tooltip="Карточка тарифа — это источник истины для новых продаж. Здесь задаются режимы цены, трафика, устройств, периоды и совместимые legacy-поля на время перехода.">?</span>
+          </h2>
+          <p class="mt-2 text-sm text-slate-400">
+            {% if constructor_supported %}
+              Тариф управляется из БД: можно задать архивирование, публичность, режим трафика, режим устройств и допустимые периоды.
+            {% else %}
+              В этом архиве конструктор ещё не полностью включён в runtime-repository. Поля конструктора уже можно готовить, но часть логики может работать через compat fallback.
+            {% endif %}
+          </p>
+        </div>
+        {% if edit_tariff %}
+          <a href="/admin/pricing/?status={{ status_filter }}" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Выйти из режима редактирования и открыть страницу без выбранного тарифа">
+            Сбросить режим редактирования
+          </a>
+        {% endif %}
+      </div>
+
+      <form method="post" action="/admin/pricing/" class="mt-6 grid gap-4 md:grid-cols-2">
+        <input type="hidden" name="action" value="save_tariff">
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Код</span>
+            <span class="help-dot" data-tooltip="Уникальный внутренний код тарифа. Лучше использовать стабильный slug без пробелов. После создания код обычно не меняют.">?</span>
+          </label>
+          <input type="text" name="tariff_code" value="{{ edit_form.code }}" {% if edit_tariff %}readonly{% endif %} class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500 {% if edit_tariff %}opacity-80{% endif %}" placeholder="Например: constructor_250">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Название</span>
+            <span class="help-dot" data-tooltip="Человекочитаемое название тарифа для администратора и, при необходимости, для пользовательского интерфейса.">?</span>
+          </label>
+          <input type="text" name="tariff_title" value="{{ edit_form.title }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500" placeholder="Например: 250 ГБ / 1 устройство">
+        </div>
+
+        <div class="md:col-span-2">
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Описание</span>
+            <span class="help-dot" data-tooltip="Краткое описание для админки или будущего пользовательского UI. Можно оставить пустым, если карточка самодостаточна по названию и параметрам.">?</span>
+          </label>
+          <textarea name="tariff_description" rows="3" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500" placeholder="Краткое описание для администратора и, при необходимости, для UI.">{{ edit_form.description }}</textarea>
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Метка</span>
+            <span class="help-dot" data-tooltip="Например: Популярный, Выгодный, Премиум. Это дополнительная визуальная метка тарифа.">?</span>
+          </label>
+          <input type="text" name="tariff_badge_text" value="{{ edit_form.badge_text }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500" placeholder="Необязательно">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Порядок сортировки</span>
+            <span class="help-dot" data-tooltip="Чем меньше значение, тем выше тариф будет отображаться в списках и preview.">?</span>
+          </label>
+          <input type="number" name="tariff_sort_order" value="{{ edit_form.sort_order }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Режим ценообразования</span>
+            <span class="help-dot" data-tooltip="Определяет, как считается цена тарифа: либо фиксированная месячная цена, либо конструктор с параметрами тарифа.">?</span>
+          </label>
+          <select name="tariff_pricing_mode" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+            {% for value, label in [('fixed', 'Фиксированная цена в месяц'), ('constructor', 'Конструктор')] %}
+              <option value="{{ value }}" {% if edit_form.pricing_mode == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Режим трафика</span>
+            <span class="help-dot" data-tooltip="Фиксированный объём, конструктор с диапазоном и шагом или безлимитный трафик.">?</span>
+          </label>
+          <select name="tariff_traffic_mode" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+            {% for value, label in [('fixed', 'Фиксированный'), ('constructor', 'Конструктор'), ('unlimited', 'Безлимит')] %}
+              <option value="{{ value }}" {% if edit_form.traffic_mode == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Режим устройств</span>
+            <span class="help-dot" data-tooltip="Фиксированное количество устройств, конструктор по шагам или режим безлимитного количества устройств.">?</span>
+          </label>
+          <select name="tariff_device_mode" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+            {% for value, label in [('fixed', 'Фиксированный'), ('constructor', 'Конструктор'), ('unlimited', 'Безлимит')] %}
+              <option value="{{ value }}" {% if edit_form.device_mode == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="md:col-span-2 grid gap-4 md:grid-cols-3">
+          <label class="inline-flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm font-medium text-slate-300">
+            <input type="checkbox" name="tariff_is_active" value="true" class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-cyan-500" {% if edit_form.is_active %}checked{% endif %}>
+            Активен
+          </label>
+          <label class="inline-flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm font-medium text-slate-300">
+            <input type="checkbox" name="tariff_is_public" value="true" class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-cyan-500" {% if edit_form.is_public %}checked{% endif %}>
+            Публичный
+          </label>
+          <label class="inline-flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm font-medium text-slate-300">
+            <input type="checkbox" name="tariff_is_archived" value="true" class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-cyan-500" {% if edit_form.is_archived %}checked{% endif %}>
+            Сразу в архив
+          </label>
+        </div>
+
+        <div class="md:col-span-2 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+          <div class="flex items-center gap-2 text-sm font-semibold text-white">
+            <span>Legacy-поля совместимости</span>
+            <span class="help-dot" data-tooltip="Нужны на переходный период для старых purchase-flow и fallback-сценариев. Даже для нового конструктора их стоит заполнять осмысленно, чтобы preview и совместимость не врали.">?</span>
+          </div>
+          <p class="mt-1 text-xs text-slate-500">
+            Нужны для совместимости переходного периода и для старых purchase-flow. Для чистого конструктора тоже заполняй их осмысленно, чтобы preview и fallback не врали.
+          </p>
+        </div>
+
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Legacy monthly traffic, ГБ</label>
+          <input type="number" name="tariff_monthly_traffic_gb" value="{{ edit_form.monthly_traffic_gb if edit_form.monthly_traffic_gb is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Цена single</label>
+          <input type="number" step="0.01" name="tariff_price_single" value="{{ edit_form.price_single }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Цена unlimited devices</label>
+          <input type="number" step="0.01" name="tariff_price_unlimited" value="{{ edit_form.price_unlimited }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Online limit single</label>
+          <input type="number" name="tariff_online_limit_single" value="{{ edit_form.online_limit_single if edit_form.online_limit_single is not none else 1 }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Online limit unlimited</label>
+          <input type="number" name="tariff_online_limit_unlimited" value="{{ edit_form.online_limit_unlimited if edit_form.online_limit_unlimited is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500" placeholder="Пусто = без ограничений">
+        </div>
+
+        <div class="md:col-span-2 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+          <div class="flex items-center gap-2 text-sm font-semibold text-white">
+            <span>Поля конструктора</span>
+            <span class="help-dot" data-tooltip="Эти значения управляют новой DB-driven моделью тарифа: диапазонами трафика, количеством устройств, допустимыми периодами и доплатами.">?</span>
+          </div>
+          <p class="mt-1 text-xs text-slate-500">
+            Эти значения управляют новой DB-driven моделью тарифа: диапазонами трафика, количеством устройств, периодами и доплатами.
+          </p>
+        </div>
+
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Базовая цена в месяц</label>
+          <input type="number" step="0.01" name="tariff_base_monthly_price" value="{{ edit_form.base_monthly_price }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Базовый трафик, ГБ</label>
+          <input type="number" name="tariff_base_traffic_gb" value="{{ edit_form.base_traffic_gb if edit_form.base_traffic_gb is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Фиксированный трафик, ГБ</label>
+          <input type="number" name="tariff_fixed_traffic_gb" value="{{ edit_form.fixed_traffic_gb if edit_form.fixed_traffic_gb is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Мин. трафик, ГБ</label>
+          <input type="number" name="tariff_min_traffic_gb" value="{{ edit_form.min_traffic_gb if edit_form.min_traffic_gb is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Макс. трафик, ГБ</label>
+          <input type="number" name="tariff_max_traffic_gb" value="{{ edit_form.max_traffic_gb if edit_form.max_traffic_gb is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Шаг трафика, ГБ</label>
+          <input type="number" name="tariff_constructor_traffic_step_gb" value="{{ edit_form.traffic_step_gb if edit_form.traffic_step_gb is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Цена шага трафика</label>
+          <input type="number" step="0.01" name="tariff_traffic_step_price" value="{{ edit_form.traffic_step_price }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Базовое число устройств</label>
+          <input type="number" name="tariff_base_device_count" value="{{ edit_form.base_device_count if edit_form.base_device_count is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Фиксированное число устройств</label>
+          <input type="number" name="tariff_fixed_device_count" value="{{ edit_form.fixed_device_count if edit_form.fixed_device_count is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Мин. устройств</label>
+          <input type="number" name="tariff_min_device_count" value="{{ edit_form.min_device_count if edit_form.min_device_count is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Макс. устройств</label>
+          <input type="number" name="tariff_max_device_count" value="{{ edit_form.max_device_count if edit_form.max_device_count is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Шаг устройств</label>
+          <input type="number" name="tariff_device_step" value="{{ edit_form.device_step if edit_form.device_step is not none else '' }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Цена шага устройства</label>
+          <input type="number" step="0.01" name="tariff_constructor_device_step_price" value="{{ edit_form.device_step_price }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="mb-2 block text-sm font-medium text-slate-300">Доплата за unlimited devices</label>
+          <input type="number" step="0.01" name="tariff_unlimited_devices_surcharge" value="{{ edit_form.unlimited_devices_surcharge }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500">
+        </div>
+        <div class="md:col-span-2">
+          <label class="inline-flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm font-medium text-slate-300">
+            <input type="checkbox" name="tariff_allow_unlimited_devices" value="true" class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-cyan-500" {% if edit_form.allow_unlimited_devices %}checked{% endif %}>
+            Разрешить режим безлимитного количества устройств
+          </label>
+        </div>
+
+        <div class="md:col-span-2">
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Допустимые периоды, месяцы</span>
+            <span class="help-dot" data-tooltip="Укажи список месяцев через запятую, например: 1,3,6,12. Именно эти варианты пользователь увидит при покупке.">?</span>
+          </label>
+          <input type="text" name="tariff_period_months_csv" value="{{ edit_form.period_months_csv }}" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-cyan-500" placeholder="Например: 1,3,6,12">
+        </div>
+
+        <div class="md:col-span-2 flex flex-wrap gap-3 pt-2">
+          <button type="submit" class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400" title="Сохранить карточку тарифа и её параметры конструктора">
+            {% if edit_tariff %}Сохранить изменения тарифа{% else %}Создать тариф{% endif %}
+          </button>
+          {% if edit_tariff %}
+            <a href="/admin/pricing/?status={{ status_filter }}" class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Отменить редактирование и вернуться к списку тарифов">
+              Отменить
+            </a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+
+    <div class="space-y-6">
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+              <span>Текущие тарифы</span>
+              <span class="help-dot" data-tooltip="Активные и неактивные тарифы. Использованные тарифы нельзя удалять физически — их переводят в архив, чтобы не ломать историю продаж и подписок.">?</span>
+            </h2>
+            <p class="mt-2 text-sm text-slate-400">
+              Активные и неактивные тарифы. Использованные тарифы нельзя удалять физически — только архивировать.
+            </p>
+          </div>
+
+          <form method="get" action="/admin/pricing/" class="flex gap-2">
+            <select name="status" class="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-white focus:border-cyan-500" title="Фильтр по состоянию тарифа">
+              {% for option in status_options %}
+                <option value="{{ option.value }}" {% if status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Применить выбранный фильтр">
+              Фильтр
+            </button>
+          </form>
+        </div>
+
+        <div class="mt-6 space-y-4">
+          {% for tariff in tariffs %}
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <div class="text-sm font-semibold text-white">{{ tariff.title }}</div>
+                    {% if tariff.badge_text %}
+                      <span class="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[11px] font-semibold text-violet-300">{{ tariff.badge_text }}</span>
+                    {% endif %}
+                  </div>
+                  <div class="mt-1 text-xs text-slate-500">{{ tariff.code }}</div>
+                </div>
+
+                <span class="rounded-full px-2 py-1 text-xs font-semibold
+                  {% if tariff.status_tone == 'emerald' %}border border-emerald-500/30 bg-emerald-500/10 text-emerald-300
+                  {% elif tariff.status_tone == 'amber' %}border border-amber-500/30 bg-amber-500/10 text-amber-300
+                  {% else %}border border-slate-700 bg-slate-900 text-slate-300{% endif %}">
+                  {{ tariff.status_label }}
+                </span>
+              </div>
+
+              <div class="mt-3 grid gap-3 text-sm text-slate-300 md:grid-cols-2">
+                <div>
+                  Режим цены: {{ tariff.pricing_mode }}<br>
+                  Трафик: {{ tariff.traffic_mode }}{% if tariff.monthly_traffic_gb is not none %} / legacy {{ tariff.monthly_traffic_gb }} ГБ{% endif %}<br>
+                  Устройства: {{ tariff.device_mode }}
+                </div>
+                <div>
+                  Цена single: {{ tariff.price_single }} ₽<br>
+                  Цена unlimited: {{ tariff.price_unlimited }} ₽<br>
+                  Базовая цена: {{ tariff.base_monthly_price }} ₽
+                </div>
+                <div>
+                  Периоды: {% if tariff.period_months %}{{ tariff.period_months | join(', ') }} мес.{% else %}Не заданы{% endif %}<br>
+                  Публичный: {{ 'Да' if tariff.is_public else 'Нет' }}<br>
+                  Порядок: {{ tariff.sort_order }}
+                </div>
+                <div>
+                  Использований: {{ tariff.usage_count if tariff.usage_count is not none else 'Не зафиксировано' }}<br>
+                  Online single: {{ tariff.online_limit_single if tariff.online_limit_single is not none else 'Не задан' }}<br>
+                  Online unlimited: {{ tariff.online_limit_unlimited if tariff.online_limit_unlimited is not none else 'Без ограничений' }}
+                </div>
+              </div>
+
+              {% if tariff.description %}
+                <div class="mt-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-3 text-sm text-slate-400">
+                  {{ tariff.description }}
+                </div>
+              {% endif %}
+
+              <div class="mt-4 flex flex-wrap gap-2">
+                <a href="/admin/pricing/?status={{ status_filter }}&edit_code={{ tariff.code }}" class="inline-flex rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Открыть тариф в режиме редактирования">
+                  Редактировать
+                </a>
+
+                {% if tariff.status != 'archived' %}
+                <form method="post" action="/admin/pricing/" onsubmit="return confirm('Архивировать тариф {{ tariff.title }} ({{ tariff.code }})?');">
+                  <input type="hidden" name="action" value="archive_tariff">
+                  <input type="hidden" name="tariff_code" value="{{ tariff.code }}">
+                  <button type="submit" class="inline-flex rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20" title="Перевести тариф в архив без потери истории использования">
+                    В архив
+                  </button>
+                </form>
+                {% endif %}
+
+                {% if tariff.usage_count in [0, None] and tariff.status != 'archived' %}
+                <form method="post" action="/admin/pricing/" onsubmit="return confirm('Удалить тариф {{ tariff.title }} ({{ tariff.code }})? Это действие необратимо.');">
+                  <input type="hidden" name="action" value="delete_tariff">
+                  <input type="hidden" name="tariff_code" value="{{ tariff.code }}">
+                  <button type="submit" class="inline-flex rounded-xl bg-rose-500 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-400" title="Полностью удалить неиспользованный тариф">
+                    Удалить
+                  </button>
+                </form>
+                {% endif %}
+              </div>
+            </div>
+          {% else %}
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">
+              Тарифы по выбранному фильтру пока не найдены.
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+          <span>Архив тарифов</span>
+          <span class="help-dot" data-tooltip="Архивные тарифы сохраняют историю и могут быть повторно активированы. Их не удаляют, если они уже использовались в покупках или подписках.">?</span>
+        </h2>
+        <p class="mt-2 text-sm text-slate-400">
+          Архивные тарифы сохраняют историю и могут быть повторно активированы. Они не должны исчезать, если уже использовались в покупках.
+        </p>
+
+        <div class="mt-6 space-y-4">
+          {% for tariff in archived_tariffs %}
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+              <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div class="text-sm font-semibold text-white">{{ tariff.title }}</div>
+                  <div class="mt-1 text-xs text-slate-500">{{ tariff.code }}</div>
+                </div>
+                <span class="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-xs font-semibold text-slate-300">{{ tariff.status_label }}</span>
+              </div>
+
+              <div class="mt-3 text-sm text-slate-300">
+                Использований: {{ tariff.usage_count if tariff.usage_count is not none else 'Не зафиксировано' }}<br>
+                Периоды: {% if tariff.period_months %}{{ tariff.period_months | join(', ') }} мес.{% else %}Не заданы{% endif %}
+              </div>
+
+              <div class="mt-4 flex flex-wrap gap-2">
+                <a href="/admin/pricing/?status=archived&edit_code={{ tariff.code }}" class="inline-flex rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Открыть карточку архивного тарифа">
+                  Открыть карточку
+                </a>
+                <form method="post" action="/admin/pricing/" onsubmit="return confirm('Вернуть тариф {{ tariff.title }} ({{ tariff.code }}) из архива?');">
+                  <input type="hidden" name="action" value="reactivate_tariff">
+                  <input type="hidden" name="tariff_code" value="{{ tariff.code }}">
+                  <button type="submit" class="inline-flex rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20" title="Вернуть архивный тариф в рабочий список">
+                    Реактивировать
+                  </button>
+                </form>
+              </div>
+            </div>
+          {% else %}
+            <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">
+              Архивных тарифов пока нет.
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

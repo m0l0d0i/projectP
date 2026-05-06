@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+
+{% block title %}Операции Marzban{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Операции Marzban</div>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <h1 class="text-3xl font-bold text-white">Операции Marzban</h1>
+        <span
+          class="help-dot"
+          tabindex="0"
+          data-tooltip="Раздел для безопасных эксплуатационных действий вокруг Marzban и geodata. Здесь не должно быть raw-доступа к системе или опасных изменений без проверок."
+          aria-label="Подсказка по разделу операций Marzban"
+        >?</span>
+      </div>
+      <p class="mt-2 text-slate-400">
+        Операционные задачи для Marzban и Xray. Здесь доступны только безопасные действия эксплуатационного уровня.
+      </p>
+      <p class="mt-3 text-xs text-slate-500">
+        Web-admin работает в local-only режиме и должен открываться через SSH-туннель.
+      </p>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/system/"
+        title="Вернуться на главную страницу админки"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+      >
+        ← На главную
+      </a>
+      <a
+        href="/admin/marzban-page/"
+        title="Открыть раздел настройки и применения страницы подписки Marzban"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+      >
+        Страница подписки
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+    <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+      ✅ {{ success_message }}
+    </div>
+  {% endif %}
+
+  {% if error_message %}
+    <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+      ❌ {{ error_message }}
+    </div>
+  {% endif %}
+
+  {% if geodata_health or marzban_access_health %}
+  <div class="grid gap-4 xl:grid-cols-2">
+    {% if geodata_health %}
+    <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-lg font-semibold text-white">Состояние geodata</h2>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Проверка каталога geodata, доступности записи и наличия файлов geoip.dat и geosite.dat перед эксплуатационными действиями."
+              aria-label="Подсказка по состоянию geodata"
+            >?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">
+            Проверка каталога assets, доступности записи и наличия geoip и geosite прямо перед ops-действиями.
+          </p>
+        </div>
+        {% if geodata_health.ok %}
+        <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">OK</span>
+        {% else %}
+        <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300">ПРОВЕРИТЬ</span>
+        {% endif %}
+      </div>
+      <div class="mt-3 text-xs uppercase tracking-wide text-slate-500">{{ geodata_health.state }}</div>
+      <div class="mt-3 whitespace-pre-line break-words text-sm text-slate-300">{{ geodata_health.message }}</div>
+    </div>
+    {% endif %}
+
+    {% if marzban_access_health %}
+    <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-lg font-semibold text-white">Подсказка по доступу к Marzban</h2>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Сводка по текущему access mode между runtime бота, хостом и Marzban API. Помогает понять, откуда именно должны выполняться операции."
+              aria-label="Подсказка по доступу к Marzban"
+            >?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">
+            Подсказка по текущему режиму доступа между runtime бота, хостом и Marzban API.
+          </p>
+        </div>
+        {% if marzban_access_health.ok %}
+        <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">OK</span>
+        {% else %}
+        <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300">ПРОВЕРИТЬ</span>
+        {% endif %}
+      </div>
+      <div class="mt-3 text-xs uppercase tracking-wide text-slate-500">{{ marzban_access_health.state }}</div>
+      <div class="mt-3 whitespace-pre-line break-words text-sm text-slate-300">{{ marzban_access_health.message }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+    <section class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold text-white">Файлы geodata</h2>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Здесь запускается безопасное обновление файлов geoip.dat и geosite.dat. Ожидается backup и атомарная запись без raw-доступа к системе."
+              aria-label="Подсказка по файлам geodata"
+            >?</span>
+          </div>
+          <p class="mt-1 text-sm text-slate-400">
+            Управление файлами <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">geoip.dat</code> и
+            <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">geosite.dat</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 rounded-2xl border border-slate-800 bg-slate-950 p-5">
+        <form method="post" action="/admin/marzban-ops/geodata/update" class="space-y-5">
+          <div>
+            <div class="mb-3 flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+              <span>Что обновить</span>
+              <span
+                class="help-dot"
+                tabindex="0"
+                data-tooltip="Можно обновить оба файла сразу или только один из них. Это полезно, если нужно заменить только geoip.dat или только geosite.dat."
+                aria-label="Подсказка по выбору файлов geodata"
+              >?</span>
+            </div>
+            <div class="grid gap-3 md:grid-cols-3">
+              <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-200">
+                <input type="radio" name="target" value="all" checked class="h-4 w-4 border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400" />
+                <span>Всё</span>
+              </label>
+
+              <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-200">
+                <input type="radio" name="target" value="geoip" class="h-4 w-4 border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400" />
+                <span>Только geoip.dat</span>
+              </label>
+
+              <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-200">
+                <input type="radio" name="target" value="geosite" class="h-4 w-4 border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400" />
+                <span>Только geosite.dat</span>
+              </label>
+            </div>
+          </div>
+
+          <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-200">
+            <input type="checkbox" name="force" value="1" class="h-4 w-4 rounded border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400" />
+            <span>Force update — обновить даже если хэш не изменился</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Используй только когда нужно принудительно перезаписать файл, даже если источник сообщает тот же хэш. В обычном режиме это не требуется."
+              aria-label="Подсказка по force update"
+            >?</span>
+          </label>
+
+          <div class="flex flex-wrap gap-3">
+            <button
+              type="submit"
+              title="Запустить безопасное обновление geodata-файлов"
+              class="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+            >
+              Запустить обновление
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+        <div class="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-300">
+          <span>Важно</span>
+          <span
+            class="help-dot"
+            tabindex="0"
+            data-tooltip="Обновление geodata должно идти через backup и атомарную запись. Раздел не предназначен для произвольного редактирования системных файлов."
+            aria-label="Подсказка по безопасному обновлению geodata"
+          >?</span>
+        </div>
+        <div class="mt-2 text-sm leading-6 text-slate-300">
+          Обновление выполняется только для geodata-файлов и не является raw-доступом к системе.
+          Перед заменой файлов должен сохраняться backup, а запись должна быть атомарной.
+        </div>
+      </div>
+    </section>
+
+    <section class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-xl font-semibold text-white">Текущий статус</h2>
+          <span
+            class="help-dot"
+            tabindex="0"
+            data-tooltip="Показывает локальное состояние geoip.dat и geosite.dat: путь, размер, хэш, время изменения и URL источника."
+            aria-label="Подсказка по текущему статусу geodata"
+          >?</span>
+        </div>
+        <p class="mt-1 text-sm text-slate-400">
+          Состояние локальных geodata assets и источников обновления.
+        </p>
+      </div>
+
+      {% set geoip = geodata_status.geoip if geodata_status is defined and geodata_status and geodata_status.geoip is defined else None %}
+      {% set geosite = geodata_status.geosite if geodata_status is defined and geodata_status and geodata_status.geosite is defined else None %}
+
+      <div class="mt-5 space-y-4">
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div class="text-sm font-semibold text-white">geoip.dat</div>
+            {% if geoip and geoip.exists %}
+              <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">На месте</span>
+            {% else %}
+              <span class="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300">Отсутствует</span>
+            {% endif %}
+          </div>
+
+          <dl class="mt-4 space-y-3 text-sm">
+            <div>
+              <dt class="text-slate-500">Путь</dt>
+              <dd class="mt-1 break-all text-slate-200">{{ geoip.path if geoip and geoip.path is defined else 'Не задан' }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Размер</dt>
+              <dd class="mt-1 text-slate-200">{{ geoip.size_label if geoip and geoip.size_label is defined else (geoip.size_bytes if geoip and geoip.size_bytes is defined else 'Не указан') }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">SHA256</dt>
+              <dd class="mt-1 break-all text-slate-200">{{ geoip.sha256 if geoip and geoip.sha256 is defined else 'Не рассчитан' }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Изменён</dt>
+              <dd class="mt-1 text-slate-200">{{ geoip.modified_at if geoip and geoip.modified_at is defined else (geoip.updated_at if geoip and geoip.updated_at is defined else 'Не зафиксировано') }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">URL источника</dt>
+              <dd class="mt-1 break-all text-slate-200">{{ geoip.source_url if geoip and geoip.source_url is defined else 'Не задан' }}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div class="text-sm font-semibold text-white">geosite.dat</div>
+            {% if geosite and geosite.exists %}
+              <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300">На месте</span>
+            {% else %}
+              <span class="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300">Отсутствует</span>
+            {% endif %}
+          </div>
+
+          <dl class="mt-4 space-y-3 text-sm">
+            <div>
+              <dt class="text-slate-500">Путь</dt>
+              <dd class="mt-1 break-all text-slate-200">{{ geosite.path if geosite and geosite.path is defined else 'Не задан' }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Размер</dt>
+              <dd class="mt-1 text-slate-200">{{ geosite.size_label if geosite and geosite.size_label is defined else (geosite.size_bytes if geosite and geosite.size_bytes is defined else 'Не указан') }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">SHA256</dt>
+              <dd class="mt-1 break-all text-slate-200">{{ geosite.sha256 if geosite and geosite.sha256 is defined else 'Не рассчитан' }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Изменён</dt>
+              <dd class="mt-1 text-slate-200">{{ geosite.modified_at if geosite and geosite.modified_at is defined else (geosite.updated_at if geosite and geosite.updated_at is defined else 'Не зафиксировано') }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">URL источника</dt>
+              <dd class="mt-1 break-all text-slate-200">{{ geosite.source_url if geosite and geosite.source_url is defined else 'Не задан' }}</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      {% if not geoip and not geosite %}
+      <div class="mt-5 rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400">
+        Статус geodata пока недоступен.
+      </div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,433 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+
+from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.config import Settings
+from app.db.models import AuditAction, AuditActorType, SupportTicketStatus
+from app.db.repositories import (
+    AppSettingsRepository,
+    AuditLogRepository,
+    SubscriptionRepository,
+    SupportTicketRepository,
+    UserRepository,
+)
+from app.keyboards.inline import low_traffic_alert_keyboard
+from app.observability.metrics import SUPPORT_TICKETS_CLOSED
+from app.services.marzban import MarzbanAPIError, MarzbanClient, MarzbanUser
+from app.services.subscription_urls import canonicalize_subscription_url_from_settings
+from app.services.subscriptions import SubscriptionService
+from app.utils.runtime_settings import effective_optional_int_from_row
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _SubscriptionTarget:
+    subscription_id: int
+    user_id: int
+    user_tg_id: int
+    marzban_username: str
+
+
+async def _mark_bot_blocked(sessionmaker: async_sessionmaker, user_id: int, reason: str) -> None:
+    async with sessionmaker.begin() as session:
+        user_repo = UserRepository(session)
+        user = await user_repo.get_by_id_for_update(user_id)
+        if user is not None:
+            await user_repo.set_bot_blocked(user, True, reason)
+
+
+async def _mark_bot_unblocked(sessionmaker: async_sessionmaker, user_id: int) -> None:
+    async with sessionmaker.begin() as session:
+        user_repo = UserRepository(session)
+        user = await user_repo.get_by_id_for_update(user_id)
+        if user is not None and user.bot_blocked:
+            await user_repo.set_bot_blocked(user, False, None)
+            logger.info('User %s restored from bot_blocked after successful delivery.', user.tg_id)
+
+
+async def _safe_send(
+    bot,
+    chat_id: int,
+    text: str,
+    *,
+    sessionmaker: async_sessionmaker | None = None,
+    user_id: int | None = None,
+    **kwargs,
+) -> bool:
+    try:
+        await bot.send_message(chat_id, text, **kwargs)
+        if sessionmaker is not None and user_id is not None:
+            await _mark_bot_unblocked(sessionmaker, user_id)
+        return True
+    except TelegramForbiddenError as exc:
+        logger.info('Telegram recipient %s blocked bot: %s', chat_id, exc)
+        if sessionmaker is not None and user_id is not None:
+            await _mark_bot_blocked(sessionmaker, user_id, str(exc))
+        return False
+    except TelegramAPIError as exc:
+        logger.warning('Failed to send telegram notification to %s: %s', chat_id, exc)
+        return False
+
+
+def _sync_local_from_remote(subscription, remote: MarzbanUser, settings: Settings) -> None:
+    subscription.expire_date = remote.expire_datetime
+    subscription.data_limit_bytes = remote.data_limit
+    subscription.used_traffic_bytes = remote.used_traffic
+
+    canonical_remote_url = canonicalize_subscription_url_from_settings(remote.subscription_url, settings)
+    if remote.subscription_url and canonical_remote_url is None:
+        logger.warning(
+            'Ignoring non-canonical remote subscription_url for subscription_id=%s username=%s value=%s',
+            getattr(subscription, 'id', None),
+            getattr(subscription, 'marzban_username', None),
+            remote.subscription_url,
+        )
+
+    canonical_existing_url = canonicalize_subscription_url_from_settings(
+        getattr(subscription, 'subscription_url', None),
+        settings,
+    )
+    subscription.subscription_url = canonical_remote_url or canonical_existing_url
+
+    online_field = settings.marzban_online_limit_field
+    if online_field:
+        subscription.online_limit = remote.raw.get(online_field)
+
+    subscription.is_active = remote.status not in {'expired', 'disabled'} and (
+        remote.expire_datetime is None or remote.expire_datetime > datetime.now(timezone.utc)
+    )
+
+
+async def _load_active_targets(sessionmaker: async_sessionmaker) -> list[_SubscriptionTarget]:
+    async with sessionmaker() as session:
+        rows = await SubscriptionRepository(session).active_with_users()
+        return [
+            _SubscriptionTarget(
+                subscription_id=subscription.id,
+                user_id=user.id,
+                user_tg_id=user.tg_id,
+                marzban_username=subscription.marzban_username,
+            )
+            for subscription, user in rows
+        ]
+
+
+async def _load_support_chat_id(sessionmaker: async_sessionmaker, settings: Settings) -> int | None:
+    try:
+        async with sessionmaker() as session:
+            repo = AppSettingsRepository(session)
+            row = await repo.get()
+            return effective_optional_int_from_row(row, 'support_chat_id', settings.support_chat_id)
+    except Exception:
+        logger.exception('Failed to load support_chat_id from AppSettings; falling back to env settings')
+
+    if settings.support_chat_id is None:
+        return None
+    return int(settings.support_chat_id)
+
+
+async def check_expiring(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
+    now = datetime.now(timezone.utc)
+
+    for target in await _load_active_targets(sessionmaker):
+        try:
+            remote = await marzban.get_user(target.marzban_username)
+        except MarzbanAPIError as exc:
+            logger.error('Failed to sync subscription for expiry notification', exc_info=exc)
+            continue
+
+        expire_at = remote.expire_datetime
+        notify_text = None
+        mark_3d = False
+        mark_1d = False
+        mark_expired = False
+        set_inactive = False
+
+        async with sessionmaker() as session:
+            subscriptions = SubscriptionRepository(session)
+            subscription = await subscriptions.get_by_id_for_update(target.subscription_id)
+            if not subscription:
+                continue
+
+            _sync_local_from_remote(subscription, remote, settings)
+
+            if expire_at is None:
+                await session.commit()
+                continue
+
+            time_left = expire_at - now
+            if time_left.total_seconds() <= 0:
+                if not subscription.notified_expired:
+                    notify_text = '❌ Ваша подписка истекла. Доступ к VPN приостановлен.\nПожалуйста, продлите тариф.'
+                    mark_expired = True
+                set_inactive = True
+            elif timedelta(days=2) < time_left <= timedelta(days=3) and not subscription.notified_3d:
+                notify_text = '⚠️ Ваша подписка истекает через 3 дня!'
+                mark_3d = True
+            elif timedelta(days=0) < time_left <= timedelta(days=1) and not subscription.notified_1d:
+                notify_text = '🔥 Ваша подписка истекает уже завтра!'
+                mark_1d = True
+
+            await session.commit()
+
+        if notify_text and not await _safe_send(
+            bot,
+            target.user_tg_id,
+            notify_text,
+            sessionmaker=sessionmaker,
+            user_id=target.user_id,
+        ):
+            continue
+
+        async with sessionmaker.begin() as session:
+            subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+            if not subscription:
+                continue
+
+            if mark_3d and not subscription.notified_3d:
+                subscription.notified_3d = True
+            if mark_1d and not subscription.notified_1d:
+                subscription.notified_1d = True
+            if mark_expired and not subscription.notified_expired:
+                subscription.notified_expired = True
+            if set_inactive:
+                subscription.is_active = False
+
+
+async def check_low_traffic(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
+    now = datetime.now(timezone.utc)
+
+    for target in await _load_active_targets(sessionmaker):
+        try:
+            remote = await marzban.get_user(target.marzban_username)
+        except MarzbanAPIError as exc:
+            logger.error('Failed to sync subscription for traffic notification', exc_info=exc)
+            continue
+
+        if remote.data_limit in (None, 0):
+            async with sessionmaker.begin() as session:
+                subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+                if subscription:
+                    _sync_local_from_remote(subscription, remote, settings)
+            continue
+
+        if remote.expire_datetime is not None and remote.expire_datetime <= now:
+            async with sessionmaker.begin() as session:
+                subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+                if subscription:
+                    _sync_local_from_remote(subscription, remote, settings)
+            continue
+
+        ratio = (remote.used_traffic / remote.data_limit) if remote.data_limit > 0 else 0
+        should_notify = False
+
+        async with sessionmaker() as session:
+            subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+            if not subscription:
+                continue
+
+            _sync_local_from_remote(subscription, remote, settings)
+            should_notify = 0.9 <= ratio < 0.99 and not subscription.notified_low_traffic
+            await session.commit()
+
+        if not should_notify:
+            continue
+
+        sent = await _safe_send(
+            bot,
+            target.user_tg_id,
+            '⚠️ Осталось меньше 10% трафика. Вы можете докупить трафик или продлить тариф досрочно.',
+            sessionmaker=sessionmaker,
+            user_id=target.user_id,
+            reply_markup=low_traffic_alert_keyboard(target.subscription_id),
+        )
+        if not sent:
+            continue
+
+        async with sessionmaker.begin() as session:
+            subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+            if subscription and not subscription.notified_low_traffic:
+                subscription.notified_low_traffic = True
+
+
+async def check_traffic_exhaustion(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
+    now = datetime.now(timezone.utc)
+
+    for target in await _load_active_targets(sessionmaker):
+        try:
+            remote = await marzban.get_user(target.marzban_username)
+        except MarzbanAPIError as exc:
+            logger.error('Failed to sync subscription for traffic exhaustion notification', exc_info=exc)
+            continue
+
+        if remote.data_limit in (None, 0):
+            async with sessionmaker.begin() as session:
+                subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+                if subscription:
+                    _sync_local_from_remote(subscription, remote, settings)
+            continue
+
+        if remote.expire_datetime is not None and remote.expire_datetime <= now:
+            async with sessionmaker.begin() as session:
+                subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+                if subscription:
+                    _sync_local_from_remote(subscription, remote, settings)
+            continue
+
+        should_notify = remote.used_traffic >= int(remote.data_limit * 0.99)
+
+        async with sessionmaker() as session:
+            subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+            if not subscription:
+                continue
+
+            _sync_local_from_remote(subscription, remote, settings)
+            should_notify = should_notify and not subscription.notified_exhausted
+            await session.commit()
+
+        if not should_notify:
+            continue
+
+        sent = await _safe_send(
+            bot,
+            target.user_tg_id,
+            '📉 <b>Ваш трафик почти исчерпан!</b>\nVPN скоро перестанет работать. Вы можете докупить трафик или досрочно продлить тариф.',
+            sessionmaker=sessionmaker,
+            user_id=target.user_id,
+            reply_markup=low_traffic_alert_keyboard(target.subscription_id),
+            parse_mode='HTML',
+        )
+        if not sent:
+            continue
+
+        async with sessionmaker.begin() as session:
+            subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+            if subscription and not subscription.notified_exhausted:
+                subscription.notified_exhausted = True
+
+
+async def check_monthly_traffic_reset(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
+    now = datetime.now(timezone.utc)
+
+    async with sessionmaker() as session:
+        rows = await SubscriptionRepository(session).due_monthly_resets(now)
+        targets = [row.id for row in rows]
+
+    for subscription_id in targets:
+        notify_tg_id = None
+        notify_user_id = None
+
+        async with sessionmaker.begin() as session:
+            subscriptions = SubscriptionRepository(session)
+            subscription = await subscriptions.get_by_id_for_update(subscription_id)
+            if not subscription:
+                continue
+
+            service = SubscriptionService(session, settings, marzban)
+            try:
+                remote = await service.process_monthly_reset(subscription)
+            except MarzbanAPIError as exc:
+                logger.error('Failed to reset monthly traffic', exc_info=exc)
+                continue
+
+            if remote is None:
+                continue
+
+            user = await UserRepository(session).get_by_id(subscription.user_id)
+            if user and subscription.monthly_traffic_bytes:
+                notify_tg_id = user.tg_id
+                notify_user_id = user.id
+
+        if notify_tg_id and notify_user_id is not None:
+            await _safe_send(
+                bot,
+                notify_tg_id,
+                '🔄 Месячный пакет трафика обновлен. Можете продолжать пользоваться VPN.',
+                sessionmaker=sessionmaker,
+                user_id=notify_user_id,
+            )
+
+
+async def check_support_ticket_auto_close(bot, sessionmaker: async_sessionmaker, settings: Settings) -> None:
+    hours = getattr(settings, 'support_ticket_auto_close_hours', 48)
+    threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
+    reason = f'timeout_{hours}h'
+    batch_size = 500
+    after_id = 0
+    support_chat_id = await _load_support_chat_id(sessionmaker, settings)
+
+    while True:
+        async with sessionmaker() as session:
+            ticket_repo = SupportTicketRepository(session)
+            user_repo = UserRepository(session)
+
+            tickets_to_close = await ticket_repo.due_auto_close(
+                threshold,
+                after_id=after_id,
+                limit=batch_size,
+            )
+
+            ticket_payloads: list[tuple[int, int | None, int | None]] = []
+            for ticket in tickets_to_close:
+                user = await user_repo.get_by_id(ticket.user_id)
+                ticket_payloads.append((ticket.id, user.id if user else None, user.tg_id if user else None))
+
+        if not ticket_payloads:
+            break
+
+        after_id = ticket_payloads[-1][0]
+
+        closed_payloads: list[tuple[int, int | None, int | None]] = []
+        for ticket_id, user_id, user_tg_id in ticket_payloads:
+            async with sessionmaker.begin() as session:
+                ticket_repo = SupportTicketRepository(session)
+                audit = AuditLogRepository(session)
+                db_ticket = await ticket_repo.get_by_id_for_update(ticket_id)
+                if not db_ticket or not db_ticket.is_active:
+                    continue
+
+                previous_status = db_ticket.status.value
+                closed = await ticket_repo.close(db_ticket, reason=reason)
+                if not closed:
+                    continue
+
+                await audit.create(
+                    action=AuditAction.ticket_closed,
+                    actor_type=AuditActorType.system,
+                    actor_tg_id=None,
+                    entity_type='support_ticket',
+                    entity_id=str(ticket_id),
+                    details={
+                        'reason': reason,
+                        'previous_status': previous_status,
+                        'new_status': SupportTicketStatus.closed.value,
+                        'closed_via': 'auto_close_job',
+                    },
+                )
+                closed_payloads.append((ticket_id, user_id, user_tg_id))
+
+        for ticket_id, user_id, user_tg_id in closed_payloads:
+            SUPPORT_TICKETS_CLOSED.labels(reason=reason).inc()
+            try:
+                if user_tg_id and user_id is not None:
+                    await _safe_send(
+                        bot,
+                        user_tg_id,
+                        '💤 Ваша заявка была автоматически закрыта из-за отсутствия активности.',
+                        sessionmaker=sessionmaker,
+                        user_id=user_id,
+                    )
+                if support_chat_id:
+                    await _safe_send(
+                        bot,
+                        support_chat_id,
+                        f'💤 Заявка #{ticket_id} #ticket{ticket_id} закрыта автоматически.',
+                    )
+            except Exception:
+                logger.exception('Failed to send auto-close notifications for ticket %s', ticket_id)
