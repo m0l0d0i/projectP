@@ -493,19 +493,51 @@ async def process_scheduled_broadcasts(bot, sessionmaker: async_sessionmaker, se
                     break
 
                 results: list[dict] = []
-                for user in users:
-                    result = await _deliver_to_user(
-                        bot,
-                        sessionmaker,
-                        settings,
-                        job_id=job_id,
-                        user=user,
-                        job=job,
-                    )
-                    results.append(result)
 
-                    if send_delay > 0:
-                        await asyncio.sleep(send_delay)
+                max_concurrent = max(1, int(getattr(settings, 'broadcast_max_concurrent', 15)))
+                sem = asyncio.Semaphore(max_concurrent)
+                rate_lock = asyncio.Lock()
+                min_interval = send_delay
+                last_send_ts: float = 0.0
+
+                async def _rate_limited_deliver(user_item):
+                    nonlocal last_send_ts
+                    async with sem:
+                        # Global rate-limiter: enforce minimum interval between sends
+                        if min_interval > 0:
+                            async with rate_lock:
+                                loop = asyncio.get_event_loop()
+                                now = loop.time()
+                                wait = last_send_ts + min_interval - now
+                                if wait > 0:
+                                    await asyncio.sleep(wait)
+                                last_send_ts = loop.time()
+                        return await _deliver_to_user(
+                            bot, sessionmaker, settings,
+                            job_id=job_id, user=user_item, job=job,
+                        )
+
+                gathered = await asyncio.gather(
+                    *[_rate_limited_deliver(u) for u in users],
+                    return_exceptions=True,
+                )
+
+                for idx, item in enumerate(gathered):
+                    if isinstance(item, BaseException):
+                        logger.warning(
+                            'Broadcast job=%s unexpected error for user_id=%s: %s',
+                            job_id, users[idx].id, item,
+                        )
+                        results.append({
+                            'user': users[idx],
+                            'status': BroadcastDeliveryStatus.failed,
+                            'attempt_count': 0,
+                            'last_error': str(item),
+                            'telegram_message_id': None,
+                            'delivered_at': None,
+                        })
+                    else:
+                        results.append(item)
 
                 persisted_job = await _persist_chunk_results(
                     sessionmaker,

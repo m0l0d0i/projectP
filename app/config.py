@@ -168,6 +168,7 @@ class Settings(BaseSettings):
     broadcast_retry_attempts: int = 3
     broadcast_retry_base_delay_seconds: float = 1.0
     broadcast_notify_policy: str = 'always'
+    broadcast_max_concurrent: int = 15
 
     rules_service_url: str | None = None
     rules_of_use_url: str | None = None
@@ -634,6 +635,12 @@ class Settings(BaseSettings):
         if normalized not in {'always', 'failures', 'never'}:
             raise ValueError('BROADCAST_NOTIFY_POLICY должен быть one of: always, failures, never')
         return normalized
+
+    @field_validator('broadcast_max_concurrent')
+    @classmethod
+    def validate_broadcast_max_concurrent(cls, value: int) -> int:
+        clamped = max(1, min(int(value), 30))
+        return clamped
 
     @field_validator('trial_duration_hours', 'trial_duration_days', 'trial_device_count')
     @classmethod
