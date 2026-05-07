@@ -71,7 +71,7 @@
 - [ ] **OPS-2 (P1).** Rate-limit на `platega_callback` и Marzban-callback'и (Redis token bucket, у проекта уже есть Redis + `anti_spam.py` шаблон).
 - [ ] **OPS-3 (P1).** Circuit breaker над `MarzbanClient` и `PlategaProvider` — `tenacity` + лёгкий wrapper. Предотвращает каскадные отказы.
 - [ ] **OPS-4 (P2).** **Outbox pattern** для transactional Telegram-сообщений: после оплаты записывать запись в `outbox` той же транзакцией; воркер доставляет exactly-once. Закрывает класс багов «Я заплатил, ничего не пришло».
-- [ ] **OPS-5 (P1).** **Idempotency keys на инвойсах** (`Invoice.idempotency_key UNIQUE`) — `BillingService.create_invoice` обязан принимать ключ. Защита от двойного нажатия.
+- [x] **OPS-5 (P1).** **Idempotency keys на инвойсах** (`Invoice.idempotency_key UNIQUE`) — `BillingService.create_invoice` обязан принимать ключ. Защита от двойного нажатия. Закрыто 2026-05-07 (commit `9cfba1a`): partial unique `WHERE idempotency_key IS NOT NULL`, ключ = SHA-256(`v1|tg_id|purpose|code|units|extras|bucket60`), коллизия → `DuplicateInvoiceError` → понятное сообщение пользователю.
 - [ ] **OPS-6 (P2).** Структурированные JSON-логи + request/update IDs middleware → парность с Sentry.
 - [ ] **OPS-7 (P2).** Scheduler job-lag SLO: экспортировать `last_run_timestamp` per job в Prometheus; Alertmanager rule на отставание.
 - [ ] **OPS-8 (P3).** Encrypted off-site backups: Postgres dump + Marzban configs + Redis snapshot, AES + S3-compatible upload (`app/services/backup.py` + scheduler job).

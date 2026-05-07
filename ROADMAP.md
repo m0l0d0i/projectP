@@ -90,7 +90,7 @@
 - [ ] **FEA-D41** = OPS-2 — Rate-limit на callback'и.
 - [ ] **FEA-D42** = OPS-3 — Circuit breaker.
 - [ ] **FEA-D43** = OPS-4 — Outbox pattern.
-- [ ] **FEA-D44** = OPS-5 — Invoice idempotency keys.
+- [x] **FEA-D44** = OPS-5 — Invoice idempotency keys.
 - [ ] **FEA-D45** = OPS-6 — JSON-логи + request IDs.
 - [ ] **FEA-D46** = OPS-7 — Scheduler lag SLO.
 
