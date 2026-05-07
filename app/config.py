@@ -119,8 +119,8 @@ class Settings(BaseSettings):
 
     web_admin_host: str = '127.0.0.1'
     web_admin_port: int = 8001
-    web_admin_username: str = 'admin'
-    web_admin_password: SecretStr = SecretStr('admin')
+    web_admin_username: str
+    web_admin_password: SecretStr
     web_admin_local_only: bool = True
     web_admin_allowed_ips: list[str] = Field(default_factory=lambda: ['127.0.0.1', '::1'])
     web_admin_allowed_proxy_ips: list[str] = Field(default_factory=list)
