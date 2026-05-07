@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import text
 
 from app.utils.formatters import bytes_to_gb, format_dt
 from app.web.routes import router as web_admin_router
@@ -212,6 +213,47 @@ def create_fastapi_app(*, sessionmaker, settings) -> FastAPI:
     app.state.payments = None
 
     app.state.web_surface = 'admin_only'
+
+    @app.get('/healthz', include_in_schema=False)
+    async def healthz() -> dict[str, bool]:
+        return {'ok': True}
+
+    @app.get('/readyz', include_in_schema=False)
+    async def readyz() -> JSONResponse:
+        sessionmaker_local = getattr(app.state, 'sessionmaker', None)
+        if sessionmaker_local is not None:
+            try:
+                async with sessionmaker_local() as session:
+                    await session.execute(text('SELECT 1'))
+            except Exception as exc:
+                logger.error('Admin readiness failed: DB error - %s', exc)
+                return JSONResponse({'ok': False, 'error': 'db_unreachable'}, status_code=500)
+
+        if settings.redis_url:
+            cache_local = getattr(app.state, 'cache', None)
+            redis_client = getattr(cache_local, 'redis', None) if cache_local is not None else None
+            if redis_client is None:
+                logger.error('Admin readiness failed: Redis configured but cache instance not attached')
+                return JSONResponse(
+                    {'ok': False, 'error': 'redis_driver_unavailable'}, status_code=500
+                )
+            try:
+                pong = await redis_client.ping()
+                if not pong:
+                    return JSONResponse(
+                        {'ok': False, 'error': 'redis_unreachable'}, status_code=500
+                    )
+            except Exception as exc:
+                logger.error('Admin readiness failed: Redis error - %s', exc)
+                return JSONResponse({'ok': False, 'error': 'redis_unreachable'}, status_code=500)
+
+        return JSONResponse(
+            {
+                'ok': True,
+                'db': 'connected' if sessionmaker_local is not None else 'disabled',
+                'redis': 'connected' if settings.redis_url else 'disabled',
+            }
+        )
 
     app.mount('/static', StaticFiles(directory=str(static_dir)), name='static')
     app.include_router(web_admin_router)
