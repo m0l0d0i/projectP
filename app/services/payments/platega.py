@@ -57,15 +57,6 @@ def _secret_to_str(value: Any) -> str | None:
     normalized = str(value).strip()
     return normalized or None
 
-
-def _secret_or_attr(obj: object, secure_attr: str, fallback_attr: str) -> str | None:
-    secure_value = getattr(obj, secure_attr, None)
-    normalized_secure = _secret_to_str(secure_value)
-    if normalized_secure is not None:
-        return normalized_secure
-    return _secret_to_str(getattr(obj, fallback_attr, None))
-
-
 def _json_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -122,7 +113,7 @@ class PlategaProvider(PaymentProvider):
         self.settings = settings
         self.base_url = (settings.platega_base_url or '').strip().rstrip('/')
         self._merchant_id = _secret_to_str(getattr(settings, 'platega_merchant_id', None))
-        self._secret = _secret_or_attr(settings, 'platega_secret_value', 'platega_secret')
+        self._secret = settings.platega_secret_value
 
         self._timeout = aiohttp.ClientTimeout(total=settings.platega_timeout_seconds)
         self._default_headers: dict[str, str] = {'Content-Type': 'application/json'}

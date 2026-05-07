@@ -215,7 +215,7 @@ async def platega_callback(request: web.Request) -> web.Response:
         logger.warning('Platega callback rejected: payment provider is %s', settings.payment_provider)
         return web.Response(status=404, text='provider disabled')
 
-    platega_secret = getattr(settings, 'platega_secret_value', None) or getattr(settings, 'platega_secret', None)
+    platega_secret = settings.platega_secret_value
     if not settings.platega_merchant_id or not platega_secret:
         logger.error('Platega callback rejected: provider credentials are not configured')
         return web.Response(status=503, text='provider not configured')
@@ -227,7 +227,7 @@ async def platega_callback(request: web.Request) -> web.Response:
         logger.warning('Platega callback rejected: invalid merchant header=%s', merchant_id)
         return web.Response(status=401, text='invalid merchant')
 
-    if not _header_matches(str(platega_secret), secret):
+    if not _header_matches(platega_secret, secret):
         logger.warning('Platega callback rejected: invalid secret for merchant=%s', merchant_id)
         return web.Response(status=401, text='invalid secret')
 

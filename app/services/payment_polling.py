@@ -13,7 +13,6 @@ from app.db.repositories import InvoiceRepository
 from app.services.marzban import MarzbanClient
 from app.services.payment_engine import PaymentService
 from app.services.payments import PaymentProviderError, PlategaProvider
-from app.services.payments.platega import _secret_or_attr
 from app.services.subscriptions import SubscriptionService
 
 logger = logging.getLogger(__name__)
@@ -76,8 +75,8 @@ async def process_pending_platega_invoices(bot, sessionmaker: async_sessionmaker
     if settings.payment_provider != 'platega':
         return
 
-    merchant_id = getattr(settings, 'platega_merchant_id', None)
-    secret = _secret_or_attr(settings, 'platega_secret_value', 'platega_secret')
+    merchant_id = settings.platega_merchant_id
+    secret = settings.platega_secret_value
     if not merchant_id or not secret:
         logger.warning('Platega polling skipped: merchant_id or secret is not configured')
         return
