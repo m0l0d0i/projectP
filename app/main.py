@@ -14,6 +14,9 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
+from aiogram.fsm.storage.base import BaseStorage
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import DefaultKeyBuilder, RedisStorage
 
 from app.config import get_settings
 from app.db.repositories import (
@@ -307,9 +310,18 @@ async def _safe_startup_ping(bot: Bot, settings, sessionmaker) -> None:
         except Exception as exc:
             logger.warning('Не удалось отправить startup message получателю %s: %s', recipient_id, exc)
 
+def _build_fsm_storage(settings) -> BaseStorage:
+    if settings.redis_url:
+        key_builder = DefaultKeyBuilder(prefix=f'{settings.redis_prefix}:fsm', with_destiny=True)
+        return RedisStorage.from_url(settings.redis_url, key_builder=key_builder)
+    logger.warning(
+        'REDIS_URL is not configured; falling back to in-memory FSM storage. '
+        'FSM contexts (in-progress payments, ticket forms, broadcasts) will be lost on restart.'
+    )
+    return MemoryStorage()
 
 def _build_dispatcher(settings, marzban, payments, sessionmaker, cache: CacheService) -> tuple[Dispatcher, AntiSpamService]:
-    dp = Dispatcher()
+    dp = Dispatcher(storage=_build_fsm_storage(settings))
 
     db_middleware = DbSessionMiddleware(sessionmaker)
     blocked_middleware = BlockedUserMiddleware(settings, cache)
@@ -683,6 +695,10 @@ async def main() -> None:
         if marzban is not None:
             with suppress(Exception):
                 await marzban.close()
+
+        if dp is not None and dp.storage is not None:
+            with suppress(Exception):
+                await dp.storage.close()
 
         if cache is not None:
             with suppress(Exception):
