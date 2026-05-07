@@ -28,8 +28,7 @@
 - [ ] **QC-7.2.** **N+1 в `app/services/notifications.py:377`** — `for ticket in tickets_to_close: user = await user_repo.get_by_id(ticket.user_id)`. Добавить `.options(selectinload(SupportTicket.user))` в `due_auto_close` или batched `users_by_id(ids)`.
 - [x] **QC-9.1.** **Нет lockfile.** Все зависимости с `>=` — рандомные апдейты при rebuild. Перейти на `pip-tools`/`uv` с `requirements.in` + pinned `requirements.txt`. Закрыто 2026-05-07 (commit `7a29e93`).
 - [x] **QC-10.1.** **CI/CD отсутствует.** Добавить минимальный workflow: `ruff check` → `mypy` → `pytest` против test-compose → `alembic upgrade head` → `docker build`. Блокировать merge без зелёного pipeline. Закрыто 2026-05-07 (commit `fdb348b`).
-- [ ] **QC-13.1.** **`audit_logs` без индекса по `created_at`.** `AuditLogRepository.list_recent` (`__init__.py:2784`) делает `ORDER BY created_at DESC, id DESC LIMIT N OFFSET M` — sequential scan при росте таблицы.
-  - **Что сделать:** миграция, добавляющая `Index('ix_audit_logs_created_at_id', created_at.desc(), id.desc())`.
+- [x] **QC-13.1.** **`audit_logs` без индекса по `created_at`.** `AuditLogRepository.list_recent` (`__init__.py:2784`) делает `ORDER BY created_at DESC, id DESC LIMIT N OFFSET M` — sequential scan при росте таблицы. Закрыто 2026-05-07: миграция `20260507_000023` создаёт `ix_audit_logs_created_at_id (created_at DESC, id DESC)`, в модель добавлен соответствующий `Index` в `__table_args__`.
 - [x] **QC-config-default-pwd.** **Удалить дефолт `web_admin_password='admin'`** из `app/config.py:122-123`. Сделать поле обязательным; pydantic свалится при отсутствии env. Так же для `web_admin_username`. Закрыто 2026-05-07 (commit `306fd5f`).
 
 ### MEDIUM (P2)

@@ -1259,6 +1259,9 @@ class BroadcastJobDelivery(TimestampMixin, Base):
 
 class AuditLog(TimestampMixin, Base):
     __tablename__ = 'audit_logs'
+    __table_args__ = (
+        Index('ix_audit_logs_created_at_id', sa_text('created_at DESC'), sa_text('id DESC')),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     action: Mapped[AuditAction] = mapped_column(Enum(AuditAction, name='audit_action'), nullable=False, index=True)
