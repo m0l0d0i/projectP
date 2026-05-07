@@ -67,7 +67,7 @@
 ## Надёжность / Ops
 
 - [x] **OPS-1 (P1).** Добавить `/healthz` (всегда 200) и `/readyz` (Postgres + Redis + Marzban ping) в `app/web/routes.py`. Сейчас `/readyz` есть только в публичном aiohttp-приложении (`app/webhooks.py:67`), но не в admin FastAPI. Закрыто 2026-05-07 (commit `76db305`, в `app/web/app.py`). Marzban ping в /readyz пока не добавлен — отдельная итерация.
-- [ ] **OPS-2 (P1).** Rate-limit на `platega_callback` и Marzban-callback'и (Redis token bucket, у проекта уже есть Redis + `anti_spam.py` шаблон).
+- [~] **OPS-2 (P1).** Rate-limit на `platega_callback` и Marzban-callback'и (Redis token bucket, у проекта уже есть Redis + `anti_spam.py` шаблон). Частично закрыто 2026-05-07: `platega_callback` ограничен 60 req / 60s per IP через существующий `cache.check_rate_limit`. Marzban callback отдельно — TODO.
 - [ ] **OPS-3 (P1).** Circuit breaker над `MarzbanClient` и `PlategaProvider` — `tenacity` + лёгкий wrapper. Предотвращает каскадные отказы.
 - [ ] **OPS-4 (P2).** **Outbox pattern** для transactional Telegram-сообщений: после оплаты записывать запись в `outbox` той же транзакцией; воркер доставляет exactly-once. Закрывает класс багов «Я заплатил, ничего не пришло».
 - [x] **OPS-5 (P1).** **Idempotency keys на инвойсах** (`Invoice.idempotency_key UNIQUE`) — `BillingService.create_invoice` обязан принимать ключ. Защита от двойного нажатия. Закрыто 2026-05-07 (commit `9cfba1a`): partial unique `WHERE idempotency_key IS NOT NULL`, ключ = SHA-256(`v1|tg_id|purpose|code|units|extras|bucket60`), коллизия → `DuplicateInvoiceError` → понятное сообщение пользователю.

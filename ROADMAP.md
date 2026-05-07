@@ -87,7 +87,7 @@
 > Эти пункты дублируются в [CODE_QUALITY.md](CODE_QUALITY.md) (раздел Reliability/Ops). Здесь — алиасы для удобства roadmap'а.
 
 - [ ] **FEA-D40** = OPS-1 — `/healthz`, `/readyz` в admin FastAPI.
-- [ ] **FEA-D41** = OPS-2 — Rate-limit на callback'и.
+- [~] **FEA-D41** = OPS-2 — Rate-limit на callback'и.
 - [ ] **FEA-D42** = OPS-3 — Circuit breaker.
 - [ ] **FEA-D43** = OPS-4 — Outbox pattern.
 - [x] **FEA-D44** = OPS-5 — Invoice idempotency keys.
