@@ -1,0 +1,67 @@
+[project]
+name = "swoivpn-bot"
+version = "0.1.0"
+description = "SwoiVPN Telegram bot + admin panel"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [
+    "alembic/versions",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # line too long — handled by formatter where needed
+    "B008",  # FastAPI/aiogram patterns rely on default arg call expressions
+    "SIM108", # ternary suggestion is sometimes worse for readability
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = false
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_decorators = false
+ignore_missing_imports = true
+exclude = [
+    "alembic/versions/",
+    "build/",
+    "dist/",
+]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
