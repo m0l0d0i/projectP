@@ -31,7 +31,7 @@ from app.keyboards.inline import (
 )
 from app.keyboards.reply import main_menu
 from app.services.marzban import MarzbanAPIError, MarzbanClient
-from app.services.payment_engine import PaymentService
+from app.services.payment_engine import DuplicateInvoiceError, PaymentService
 from app.services.payments.base import PaymentProvider, PaymentProviderError
 from app.services.subscriptions import SubscriptionService
 from app.services.tariffs import PricingService, money
@@ -53,6 +53,28 @@ def _user_friendly_payment_error_message(exc: PaymentProviderError) -> str:
 async def _handle_payment_provider_error(callback: CallbackQuery, *, action: str, exc: PaymentProviderError) -> None:
     logger.exception('Payment provider error during %s', action, exc_info=(type(exc), exc, exc.__traceback__))
     await safe_callback_answer(callback, _user_friendly_payment_error_message(exc), show_alert=True)
+
+
+_DUPLICATE_INVOICE_USER_MESSAGE = (
+    'Вы уже создавали такой счёт несколько секунд назад. '
+    'Откройте предыдущее сообщение со ссылкой на оплату.'
+)
+
+
+async def _handle_duplicate_invoice(
+    callback: CallbackQuery,
+    *,
+    action: str,
+    user_tg_id: int | None,
+    exc: DuplicateInvoiceError,
+) -> None:
+    logger.warning(
+        'Duplicate invoice intent rejected during %s: tg_id=%s key=%s',
+        action,
+        user_tg_id,
+        exc.idempotency_key,
+    )
+    await safe_callback_answer(callback, _DUPLICATE_INVOICE_USER_MESSAGE, show_alert=True)
 
 
 def _format_amount_label(value: Decimal | int) -> str:
@@ -416,6 +438,14 @@ async def balance_amount_callbacks(
         try:
             invoice = await service.create_balance_topup_invoice(user=user, amount=Decimal(str(amount)))
             await session.commit()
+        except DuplicateInvoiceError as exc:
+            await _handle_duplicate_invoice(
+                callback,
+                action='create_balance_topup_invoice',
+                user_tg_id=user.tg_id,
+                exc=exc,
+            )
+            return
         except PaymentProviderError as exc:
             await _handle_payment_provider_error(callback, action='create_balance_topup_invoice', exc=exc)
             return
@@ -713,6 +743,14 @@ async def choose_months(
             selected_traffic_gb=_selected_traffic_gb_from_code(callback_data.package_code),
         )
         await session.commit()
+    except DuplicateInvoiceError as exc:
+        await _handle_duplicate_invoice(
+            callback,
+            action='create_tariff_invoice',
+            user_tg_id=user.tg_id,
+            exc=exc,
+        )
+        return
     except PaymentProviderError as exc:
         await _handle_payment_provider_error(callback, action='create_tariff_invoice', exc=exc)
         return
@@ -747,6 +785,14 @@ async def buy_topup(
             subscription_id=callback_data.subscription_id or None,
         )
         await session.commit()
+    except DuplicateInvoiceError as exc:
+        await _handle_duplicate_invoice(
+            callback,
+            action='create_topup_invoice',
+            user_tg_id=user.tg_id,
+            exc=exc,
+        )
+        return
     except PaymentProviderError as exc:
         await _handle_payment_provider_error(callback, action='create_topup_invoice', exc=exc)
         return

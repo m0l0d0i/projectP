@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -26,6 +27,7 @@ from app.db.repositories import (
     UserRepository,
 )
 from app.observability.metrics import PAYMENTS_CONSUMED, PAYMENTS_CREATED, PAYMENTS_FAILED
+from app.services.idempotency import build_invoice_idempotency_key
 from app.services.payments.base import PaymentProvider, PaymentProviderError
 from app.services.referrals import ReferralService
 from app.services.subscriptions import SubscriptionService
@@ -33,6 +35,19 @@ from app.services.tariffs import PricingService
 
 RUB = Decimal('0.01')
 _ALLOWED_DEVICE_MODES = {'single', 'custom', 'unlimited'}
+_IDEMPOTENCY_INDEX_NAME = 'uq_invoices_idempotency_key'
+
+
+class DuplicateInvoiceError(Exception):
+    """Raised when invoice creation collides on its idempotency_key.
+
+    Indicates the same purchase intent was submitted twice within the
+    bucket window (typical cause: double-click on the buy button).
+    """
+
+    def __init__(self, idempotency_key: str) -> None:
+        super().__init__(f'Duplicate invoice intent (key={idempotency_key})')
+        self.idempotency_key = idempotency_key
 
 
 @dataclass(slots=True)
@@ -373,6 +388,7 @@ class PaymentService:
         currency: str = 'RUB',
         tariff_plan_id: int | None = None,
         tariff_snapshot_json: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> Invoice:
         create_kwargs = {
             'user_id': user_id,
@@ -383,6 +399,7 @@ class PaymentService:
             'provider': provider,
             'payload_json': payload_json,
             'currency': currency,
+            'idempotency_key': idempotency_key,
         }
         if tariff_plan_id is not None or tariff_snapshot_json is not None:
             create_kwargs['tariff_plan_id'] = tariff_plan_id
@@ -390,9 +407,15 @@ class PaymentService:
 
         try:
             invoice = await self.invoices.create(**create_kwargs)
+        except IntegrityError as exc:
+            if idempotency_key is not None and _IDEMPOTENCY_INDEX_NAME in str(exc.orig):
+                await self.session.rollback()
+                raise DuplicateInvoiceError(idempotency_key) from exc
+            raise
         except TypeError:
             create_kwargs.pop('tariff_plan_id', None)
             create_kwargs.pop('tariff_snapshot_json', None)
+            create_kwargs.pop('idempotency_key', None)
             invoice = await self.invoices.create(**create_kwargs)
             if tariff_plan_id is not None and hasattr(invoice, 'tariff_plan_id'):
                 setattr(invoice, 'tariff_plan_id', tariff_plan_id)
@@ -655,6 +678,19 @@ class PaymentService:
             target_subscription=target_subscription,
             tariff_snapshot=tariff_snapshot,
         )
+        idempotency_key = build_invoice_idempotency_key(
+            tg_id=user.tg_id,
+            purpose=InvoicePurpose.tariff.value,
+            code=package_code,
+            units=normalized_months,
+            extras={
+                'device_mode': normalized_device_mode,
+                'device_count': normalized_device_count,
+                'subscription_id': target_subscription_id or 0,
+                'early_renewal': int(bool(early_renewal)),
+                'traffic_gb': selected_traffic_gb if selected_traffic_gb is not None else 0,
+            },
+        )
         invoice = await self._create_invoice(
             user_id=user.id,
             purpose=InvoicePurpose.tariff,
@@ -665,6 +701,7 @@ class PaymentService:
             payload_json=payload,
             tariff_plan_id=tariff_plan_id,
             tariff_snapshot_json=tariff_snapshot,
+            idempotency_key=idempotency_key,
         )
         self._normalize_invoice_amounts(invoice)
         await self._refresh_provider_invoice(invoice)
@@ -685,6 +722,15 @@ class PaymentService:
             'cycle_extra_traffic_only': True,
             **self._build_subscription_snapshot_payload(target_subscription),
         }
+        idempotency_key = build_invoice_idempotency_key(
+            tg_id=user.tg_id,
+            purpose=InvoicePurpose.topup.value,
+            code=topup_code,
+            units=0,
+            extras={
+                'subscription_id': (target_subscription.id if target_subscription is not None else 0),
+            },
+        )
         invoice = await self._create_invoice(
             user_id=user.id,
             purpose=InvoicePurpose.topup,
@@ -693,6 +739,7 @@ class PaymentService:
             payable_amount=self._money(basket.payable),
             provider=self.payments.provider_name,
             payload_json=payload,
+            idempotency_key=idempotency_key,
         )
         self._normalize_invoice_amounts(invoice)
         await self._refresh_provider_invoice(invoice)
@@ -710,6 +757,12 @@ class PaymentService:
             'topup_amount': str(amount),
             'description': f'Пополнение баланса на {amount} ₽',
         }
+        idempotency_key = build_invoice_idempotency_key(
+            tg_id=user.tg_id,
+            purpose=InvoicePurpose.balance_topup.value,
+            code='',
+            units=str(amount),
+        )
         invoice = await self._create_invoice(
             user_id=user.id,
             purpose=InvoicePurpose.balance_topup,
@@ -718,6 +771,7 @@ class PaymentService:
             payable_amount=amount,
             provider=self.payments.provider_name,
             payload_json=payload,
+            idempotency_key=idempotency_key,
         )
         self._normalize_invoice_amounts(invoice)
         await self._refresh_provider_invoice(invoice)

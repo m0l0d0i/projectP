@@ -1500,6 +1500,7 @@ class InvoiceRepository:
         currency: str = 'RUB',
         tariff_plan_id: int | None = None,
         tariff_snapshot_json: dict | None = None,
+        idempotency_key: str | None = None,
     ) -> Invoice:
         invoice = Invoice(
             user_id=user_id,
@@ -1514,11 +1515,18 @@ class InvoiceRepository:
             currency=currency,
             tariff_plan_id=tariff_plan_id,
             tariff_snapshot_json=tariff_snapshot_json,
+            idempotency_key=idempotency_key,
             status=InvoiceStatus.pending,
         )
         self.session.add(invoice)
         await self.session.flush()
         return invoice
+
+    async def get_by_idempotency_key(self, idempotency_key: str) -> Invoice | None:
+        res = await self.session.execute(
+            select(Invoice).where(Invoice.idempotency_key == idempotency_key)
+        )
+        return res.scalar_one_or_none()
 
     async def get_by_id(self, invoice_id: int) -> Invoice | None:
         res = await self.session.execute(select(Invoice).where(Invoice.id == invoice_id))

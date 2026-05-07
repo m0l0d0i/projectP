@@ -971,6 +971,12 @@ class Invoice(TimestampMixin, Base):
         CheckConstraint('balance_used >= 0', name='ck_invoices_balance_used_non_negative'),
         CheckConstraint('payable_amount >= 0', name='ck_invoices_payable_non_negative'),
         UniqueConstraint('provider', 'external_invoice_id', name='uq_invoices_provider_external'),
+        Index(
+            'uq_invoices_idempotency_key',
+            'idempotency_key',
+            unique=True,
+            postgresql_where=sa_text('idempotency_key IS NOT NULL'),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -985,6 +991,7 @@ class Invoice(TimestampMixin, Base):
     )
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default='mock', server_default=sa_text("'mock'"))
     external_invoice_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     balance_used: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
