@@ -44,7 +44,7 @@
 - [ ] **QC-7.1.** В FastAPI-роутах handler открывает несколько независимых сессий (`_notify_ticket_closed_from_web_admin` в `routes.py:200` — две). Сделать `Depends(get_session)` per HTTP request с явным commit/rollback.
 - [ ] **QC-7.3.** Sparse eager-loading: 16 `selectinload`/`joinedload` на 27 relationship'ов. Аудит `.subscriptions/.invoices/.deliveries/.tickets` доступов вне репозиториев — добавлять `selectinload`.
 - [ ] **QC-8.1.** **101 поле в `Settings`, 158 env-переменных в `.env.example`.** Разнести через `env_nested_delimiter`: `MarzbanSettings`, `PaymentSettings`, `BroadcastSettings`, `AntiSpamSettings`, `WebAdminSettings`, `GeodataSettings`. Доступ как `settings.marzban.*`.
-- [ ] **QC-8.3.** `trial_duration_hours` и `trial_duration_days` сосуществуют, читается только первый, делится на 24. Удалить `TRIAL_DURATION_HOURS`.
+- [x] **QC-8.3.** Закрыто 2026-05-09: поле `trial_duration_hours` и env `TRIAL_DURATION_HOURS` удалены из `app/config.py` + `.env.example`; fallback `_load_trial_settings` в `app/services/subscriptions.py` упрощён до `trial_duration_days` (с дефолтом 1). Bootstrap-миграция `20260403_000010` оставлена как есть.
 - [ ] **QC-11.1.** Нет `README`, `CONTRIBUTING`, `CHANGELOG`, `LICENSE`. Минимум: README с архитектурой, "как запустить локально", "как добавить миграцию"; LICENSE — юридическая необходимость.
 - [ ] **QC-11.2.** Нет module-level docstrings. Добавить 3–5 строк в каждый сервисный модуль (вход/выход/транзакционные границы).
 - [ ] **QC-12.1.** В 16 дней — 4 «rework/repair» миграции; downgrade у `20260410_000017_subscription_url_canonical_repair.py` — no-op. Заморозить дизайн тарифов перед новыми изменениями; пометить data-rewrite миграции как irrecoverable в docstring.

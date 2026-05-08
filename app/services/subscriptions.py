@@ -592,11 +592,7 @@ class SubscriptionService:
                 device_count=effective_int_from_row(row, 'trial_device_count', self.settings.trial_device_count, minimum=1),
             )
 
-        fallback_days = max(
-            1,
-            int(getattr(self.settings, 'trial_duration_days', 0) or 0)
-            or max(1, int(getattr(self.settings, 'trial_duration_hours', 24)) // 24),
-        )
+        fallback_days = max(1, int(getattr(self.settings, 'trial_duration_days', 1) or 1))
         fallback_traffic = max(0, int(getattr(self.settings, 'trial_traffic_gb', 5)))
         fallback_devices = max(1, int(getattr(self.settings, 'trial_device_count', 1)))
 

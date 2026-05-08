@@ -139,7 +139,6 @@ class Settings(BaseSettings):
     sentry_environment: str = 'production'
     metrics_enabled: bool = True
 
-    trial_duration_hours: int = 24
     trial_duration_days: int = 1
     trial_traffic_gb: int = 5
     trial_device_count: int = 1
@@ -642,7 +641,7 @@ class Settings(BaseSettings):
         clamped = max(1, min(int(value), 30))
         return clamped
 
-    @field_validator('trial_duration_hours', 'trial_duration_days', 'trial_device_count')
+    @field_validator('trial_duration_days', 'trial_device_count')
     @classmethod
     def validate_positive_trial_values(cls, value: int, info) -> int:
         if int(value) < 1:
