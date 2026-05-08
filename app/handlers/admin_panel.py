@@ -24,7 +24,6 @@ from app.db.models import (
     TransactionType,
 )
 from app.db.repositories import (
-    AppSettingsRepository,
     AuditLogRepository,
     BroadcastJobRepository,
     PricingRuleRepository,
@@ -34,6 +33,7 @@ from app.db.repositories import (
     TransactionRepository,
     UserRepository,
 )
+from app.filters.admin import IsAdminFilter
 from app.keyboards.inline import (
     AdminCallback,
     admin_back_keyboard,
@@ -53,10 +53,11 @@ from app.keyboards.inline import (
 from app.services.promos import PromoService
 from app.services.tariffs import PricingService
 from app.states.admin import AdminState
-from app.utils.runtime_settings import coerce_int_set, effective_list_from_row
 from app.utils.telegram import safe_edit_message_text
 
 router = Router(name='admin_panel')
+router.message.filter(IsAdminFilter())
+router.callback_query.filter(IsAdminFilter())
 logger = logging.getLogger('app.audit')
 
 PAGE_SIZE = 8
@@ -75,18 +76,6 @@ PRICE_EDITABLE_FIELDS = {
 
 ADMIN_UI_TZ = ZoneInfo('Europe/Moscow')
 ADMIN_UI_TZ_LABEL = 'МСК'
-
-
-async def _load_admin_ids(session: AsyncSession, settings: Settings) -> set[int]:
-    try:
-        row = await AppSettingsRepository(session).get()
-        return coerce_int_set(effective_list_from_row(row, 'admin_ids', settings.admin_ids))
-    except Exception:
-        return coerce_int_set(settings.admin_ids)
-
-
-async def _is_admin_tg(session: AsyncSession, tg_id: int, settings: Settings) -> bool:
-    return tg_id in await _load_admin_ids(session, settings)
 
 
 async def _show_root(target, session: AsyncSession, settings: Settings, *, edit: bool = False) -> None:
@@ -282,8 +271,6 @@ async def _show_broadcasts(target, session: AsyncSession, *, edit: bool = False)
 @router.message(Command('admin'))
 @router.message(F.text == '⚙️ Админка')
 async def admin_root(message: Message, session: AsyncSession, settings: Settings, state: FSMContext) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
     await state.clear()
     await _show_root(message, session, settings)
 
@@ -295,8 +282,6 @@ async def admin_root_cb(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, callback.from_user.id, settings):
-        return
     await state.clear()
     await _show_root(callback, session, settings, edit=True)
     await callback.answer()
@@ -316,9 +301,6 @@ async def admin_users(
     state: FSMContext,
     cache: CacheService,
 ) -> None:
-    if not await _is_admin_tg(session, callback.from_user.id, settings):
-        return
-
     await state.clear()
     repo = UserRepository(session)
     audit_repo = AuditLogRepository(session)
@@ -398,9 +380,6 @@ async def admin_users(
 
 @router.message(AdminState.waiting_user_query)
 async def admin_users_query(message: Message, session: AsyncSession, settings: Settings, state: FSMContext) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
-
     users = await UserRepository(session).search(message.text or '', limit=20)
     await state.clear()
     if not users:
@@ -417,9 +396,6 @@ async def admin_balance_amount(
     state: FSMContext,
     cache: CacheService,
 ) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
-
     data = await state.get_data()
     try:
         amount = Decimal((message.text or '').replace(',', '.').strip())
@@ -487,9 +463,6 @@ async def admin_promos(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, callback.from_user.id, settings):
-        return
-
     await state.clear()
     repo = PromoRepository(session)
     audit_repo = AuditLogRepository(session)
@@ -604,9 +577,6 @@ async def admin_promo_create_input(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
-
     try:
         code, bonus, max_uses, minutes = [part.strip() for part in (message.text or '').split(';')]
         final_code = None if code.upper() == 'AUTO' else code.upper()
@@ -662,9 +632,6 @@ async def admin_promo_edit_input(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
-
     data = await state.get_data()
     promo = await PromoRepository(session).get_by_id_for_update(int(data['promo_id']))
     if not promo:
@@ -717,9 +684,6 @@ async def admin_tickets(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, callback.from_user.id, settings):
-        return
-
     await state.clear()
     repo = SupportTicketRepository(session)
 
@@ -812,9 +776,6 @@ async def admin_price(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, callback.from_user.id, settings):
-        return
-
     if callback_data.action == 'edit' and callback_data.field:
         await state.set_state(AdminState.waiting_price_edit)
         await state.update_data(price_field=callback_data.field)
@@ -850,9 +811,6 @@ async def admin_price_edit_input(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
-
     data = await state.get_data()
     field = data.get('price_field')
     if field not in PRICE_EDITABLE_FIELDS:
@@ -894,9 +852,6 @@ async def admin_price_edit_input(
 
 @router.callback_query(AdminCallback.filter(F.section == 'tariffs'))
 async def admin_tariffs(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
-    if not await _is_admin_tg(session, callback.from_user.id, settings):
-        return
-
     rules = await PricingService.get_rules(session)
     plans = await PricingService.list_plans(session)
     text = ['📦 <b>Тарифный конструктор</b>', '']
@@ -921,9 +876,6 @@ async def admin_broadcast(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, callback.from_user.id, settings):
-        return
-
     repo = BroadcastJobRepository(session)
     audit_repo = AuditLogRepository(session)
 
@@ -1115,8 +1067,6 @@ async def admin_broadcast(
 
 @router.message(AdminState.waiting_broadcast_text)
 async def admin_broadcast_text(message: Message, session: AsyncSession, settings: Settings, state: FSMContext) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
     text_value = (message.text or '').strip()
     if not text_value:
         await message.answer('Текст пустой. Введите текст рассылки.')
@@ -1132,9 +1082,6 @@ async def admin_broadcast_custom_time(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
-
     data = await state.get_data()
     text_value = (data.get('broadcast_text') or '').strip()
     if not text_value:
@@ -1158,9 +1105,6 @@ async def admin_broadcast_edit_text(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
-
     text_value = (message.text or '').strip()
     if not text_value:
         await message.answer('Текст пустой. Введите новый текст рассылки.')
@@ -1200,9 +1144,6 @@ async def admin_broadcast_edit_custom_time(
     settings: Settings,
     state: FSMContext,
 ) -> None:
-    if not await _is_admin_tg(session, message.from_user.id, settings):
-        return
-
     try:
         run_at = _parse_admin_run_at(message.text or '')
     except ValueError as exc:
