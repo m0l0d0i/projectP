@@ -15,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from contextlib import suppress
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -70,6 +71,7 @@ from app.services.payment_engine import PaymentService
 from app.services.payments import MockPaymentProvider, PaymentProvider, PlategaProvider
 from app.services.promos import PromoService
 from app.services.routing_profiles import RoutingProfilesService, RoutingProfileValidationError
+from app.services.web_admin_auth import verify_password
 from app.services.subscription_urls import build_canonical_subscription_url, configured_public_subscription_origin
 from app.services.subscriptions import SubscriptionService
 from app.services.tariffs import PricingService
@@ -325,16 +327,65 @@ def _safe_csv_cell(value: object) -> str:
     return text
 
 
+_LOGIN_FAILURE_WINDOW_SECONDS = 300.0
+_LOGIN_FAILURE_LIMIT = 10
+_LOGIN_FAILURES_MAX_TRACKED_IPS = 10_000
+_login_failures: dict[str, list[float]] = {}
+
+
+def _login_rate_limit_check(client_ip: str) -> tuple[bool, int]:
+    """Returns (allowed, retry_after_seconds). Reads-only; does not record."""
+    now = time.monotonic()
+    cutoff = now - _LOGIN_FAILURE_WINDOW_SECONDS
+
+    bucket = _login_failures.get(client_ip)
+    if not bucket:
+        return True, 0
+
+    bucket = [t for t in bucket if t > cutoff]
+    _login_failures[client_ip] = bucket
+
+    if len(bucket) >= _LOGIN_FAILURE_LIMIT:
+        oldest = bucket[0]
+        return False, max(1, int((oldest + _LOGIN_FAILURE_WINDOW_SECONDS) - now))
+    return True, 0
+
+
+def _record_login_failure(client_ip: str) -> None:
+    now = time.monotonic()
+    cutoff = now - _LOGIN_FAILURE_WINDOW_SECONDS
+
+    if len(_login_failures) >= _LOGIN_FAILURES_MAX_TRACKED_IPS and client_ip not in _login_failures:
+        # naive eviction: drop oldest tracked IPs
+        for evict_ip in list(_login_failures.keys())[: len(_login_failures) // 4]:
+            del _login_failures[evict_ip]
+
+    bucket = _login_failures.setdefault(client_ip, [])
+    bucket.append(now)
+    _login_failures[client_ip] = [t for t in bucket if t > cutoff]
+
+
 def require_web_admin(
     request: Request,
     creds: HTTPBasicCredentials = Depends(web_admin_security),
 ) -> None:
     settings = request.app.state.settings
+    client_ip = request.client.host if request.client else 'unknown'
+
+    allowed, retry_after = _login_rate_limit_check(client_ip)
+    if not allowed:
+        logger.warning('Web-admin login rate-limited: ip=%s retry_after=%s', client_ip, retry_after)
+        raise HTTPException(
+            status_code=429,
+            detail='Too many failed login attempts',
+            headers={'Retry-After': str(retry_after), 'WWW-Authenticate': 'Basic'},
+        )
 
     valid_username = secrets.compare_digest(creds.username, settings.web_admin_username)
-    valid_password = secrets.compare_digest(creds.password, settings.web_admin_password_value)
+    valid_password = verify_password(settings.web_admin_password_value, creds.password)
 
     if not (valid_username and valid_password):
+        _record_login_failure(client_ip)
         raise HTTPException(
             status_code=401,
             detail='Unauthorized',

@@ -120,6 +120,14 @@ def create_fastapi_app(*, sessionmaker, settings) -> FastAPI:
     """
     Local-only web admin application.
     """
+    from app.services.web_admin_auth import validate_password_strength, WebAdminPasswordTooWeak
+
+    try:
+        validate_password_strength(settings.web_admin_password_value)
+    except WebAdminPasswordTooWeak as exc:
+        logger.error('Web-admin password validation failed: %s', exc)
+        raise
+
     base_dir = Path(__file__).resolve().parents[1]
     static_dir = base_dir / 'static'
     templates_dir = base_dir / 'templates'

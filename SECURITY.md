@@ -19,8 +19,7 @@
 
 ## HIGH (P1)
 
-- [ ] **SEC-H1.** Web-admin: HTTP Basic + plaintext `secrets.compare_digest` без хэширования, без rate-limit, без lockout; дефолтный логин/пароль `admin/admin` (`config.py:122-123`, `main.py:42-43`).
-  - **Что сделать:** Argon2id хэш в env/DB; per-IP token bucket (10/5m); запрет старта при слабом пароле (`<14`); подумать о session cookie + TOTP вместо Basic.
+- [x] **SEC-H1.** Web-admin: HTTP Basic + plaintext `secrets.compare_digest` без хэширования, без rate-limit, без lockout; дефолтный логин/пароль `admin/admin` (`config.py:122-123`, `main.py:42-43`). Закрыто 2026-05-07: `app/services/web_admin_auth.py` (Argon2id verify с graceful fallback на plaintext-сравнение для обратной совместимости в dev), per-IP token bucket в `require_web_admin` (10 fails / 5 min → 429 + Retry-After), `validate_password_strength` отбрасывает старт если plaintext < 14 символов или из blacklist (`admin`, `password`, `qwerty`...). Argon2 хэш генерится через `python -c "from app.services.web_admin_auth import hash_password; print(hash_password('YOUR_PASSWORD'))"`. Session cookie + TOTP — отдельная задача.
 - [ ] **SEC-H2.** SSRF: geodata URL допускает любой `http(s)`, Marzban httpx-клиент с `follow_redirects=True` без ограничения хоста.
   - **Файлы:** `app/services/geodata_updater.py:535-543`, `app/services/marzban.py:183-187`
   - **Что сделать:** переиспользовать существующий `_validate_public_https_base_url` (отсев приватных/loopback/link-local); `follow_redirects=False` или whitelist хоста.
