@@ -5,7 +5,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2976,28 +2976,50 @@ class OutboxRepository:
             next_attempt_at=datetime.now(timezone.utc),
             correlation_key=correlation_key,
         )
-        self.session.add(row)
+        # SAVEPOINT, чтобы коллизия correlation_key не откатывала
+        # внешнюю транзакцию (в `_consume_paid_invoice` она содержит
+        # invoice→consumed, balance update, audit и т.п.).
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(row)
+                await self.session.flush()
         except IntegrityError as exc:
             if correlation_key is not None and 'uq_outbox_messages_correlation_key' in str(exc.orig):
-                await self.session.rollback()
                 return None
             raise
         return row
 
-    async def claim_due(self, *, limit: int = 50) -> list[OutboxMessage]:
-        """Atomically claim up to `limit` pending rows for the worker.
+    async def claim_due(
+        self,
+        *,
+        limit: int = 50,
+        processing_timeout_seconds: int = 120,
+    ) -> list[OutboxMessage]:
+        """Atomically claim up to `limit` due rows for the worker.
 
-        Uses `FOR UPDATE SKIP LOCKED` so multiple workers don't fight.
-        Status is flipped to `processing` and saved before returning.
+        Picks up:
+          - status=pending AND next_attempt_at <= now (normal), и
+          - status=processing AND updated_at < now - processing_timeout (orphaned:
+            воркер крашнулся между claim и mark_sent/mark_failed).
+
+        Uses `FOR UPDATE SKIP LOCKED` чтобы воркеры не дрались за один и тот же ряд.
+        Status flipped to processing + attempts++ + updated_at refreshed.
         """
         now = datetime.now(timezone.utc)
+        orphan_cutoff = now - timedelta(seconds=processing_timeout_seconds)
         stmt = (
             select(OutboxMessage)
             .where(
-                OutboxMessage.status == OutboxStatus.pending,
-                OutboxMessage.next_attempt_at <= now,
+                or_(
+                    and_(
+                        OutboxMessage.status == OutboxStatus.pending,
+                        OutboxMessage.next_attempt_at <= now,
+                    ),
+                    and_(
+                        OutboxMessage.status == OutboxStatus.processing,
+                        OutboxMessage.updated_at < orphan_cutoff,
+                    ),
+                )
             )
             .order_by(OutboxMessage.next_attempt_at.asc(), OutboxMessage.id.asc())
             .limit(limit)
