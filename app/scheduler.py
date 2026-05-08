@@ -12,6 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.config import Settings
 from app.services.broadcast_polling import process_scheduled_broadcasts
 from app.services.marzban import MarzbanClient
+from app.services.notification_dispatcher import NotificationDispatcher
 from app.services.notifications import (
     check_expiring,
     check_low_traffic,
@@ -175,7 +176,13 @@ return 0
                 await self._redis.aclose()
 
 
-def build_scheduler(bot, sessionmaker, settings: Settings, marzban: MarzbanClient) -> AsyncIOScheduler:
+def build_scheduler(
+    bot,
+    sessionmaker,
+    settings: Settings,
+    marzban: MarzbanClient,
+    notification_dispatcher: NotificationDispatcher | None = None,
+) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(
         timezone='UTC',
         job_defaults={
@@ -185,11 +192,20 @@ def build_scheduler(bot, sessionmaker, settings: Settings, marzban: MarzbanClien
         },
     )
 
+    notif_kwargs: dict = {
+        'bot': bot,
+        'sessionmaker': sessionmaker,
+        'settings': settings,
+        'marzban': marzban,
+    }
+    if notification_dispatcher is not None:
+        notif_kwargs['dispatcher'] = notification_dispatcher
+
     scheduler.add_job(
         check_expiring,
         'interval',
         hours=12,
-        kwargs={'bot': bot, 'sessionmaker': sessionmaker, 'settings': settings, 'marzban': marzban},
+        kwargs=notif_kwargs,
         id='check_expiring',
         name='check_expiring',
         replace_existing=True,
@@ -199,7 +215,7 @@ def build_scheduler(bot, sessionmaker, settings: Settings, marzban: MarzbanClien
         check_low_traffic,
         'interval',
         hours=6,
-        kwargs={'bot': bot, 'sessionmaker': sessionmaker, 'settings': settings, 'marzban': marzban},
+        kwargs=notif_kwargs,
         id='check_low_traffic',
         name='check_low_traffic',
         replace_existing=True,
@@ -209,7 +225,7 @@ def build_scheduler(bot, sessionmaker, settings: Settings, marzban: MarzbanClien
         check_traffic_exhaustion,
         'interval',
         hours=6,
-        kwargs={'bot': bot, 'sessionmaker': sessionmaker, 'settings': settings, 'marzban': marzban},
+        kwargs=notif_kwargs,
         id='check_traffic_exhaustion',
         name='check_traffic_exhaustion',
         replace_existing=True,

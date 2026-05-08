@@ -4,6 +4,7 @@ import secrets
 import string
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Any
 
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
@@ -25,6 +26,7 @@ from app.db.models import (
     InvoicePurpose,
     InvoiceStatus,
     MarzbanPageSettings,
+    NotificationRule,
     OutboxKind,
     OutboxMessage,
     OutboxStatus,
@@ -2931,6 +2933,72 @@ class MarzbanPageSettingsRepository:
         row.show_qr_button = bool(show_qr_button)
         await self.session.flush()
         return row
+
+
+class NotificationRuleRepository:
+    """Хранилище правил push-уведомлений (FEA-NOTIF).
+
+    Используется `NotificationDispatcher` для резолва текста/кнопок/cooldown
+    по `code`, и admin-UI — для редактирования. Правила seed-ятся миграцией;
+    отсутствующее правило означает «использовать вшитый fallback в коде».
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_code(self, code: str) -> NotificationRule | None:
+        res = await self.session.execute(
+            select(NotificationRule).where(NotificationRule.code == code)
+        )
+        return res.scalar_one_or_none()
+
+    async def list_all(self) -> list[NotificationRule]:
+        res = await self.session.execute(
+            select(NotificationRule).order_by(
+                NotificationRule.priority.asc(), NotificationRule.code.asc()
+            )
+        )
+        return list(res.scalars().all())
+
+    async def update_rule(
+        self,
+        rule: NotificationRule,
+        *,
+        is_enabled: bool | None = None,
+        template_text: str | None = None,
+        template_keyboard_json: list[Any] | None = None,
+        cooldown_seconds: int | None = None,
+        segment_filter_json: dict[str, Any] | None = None,
+        priority: int | None = None,
+        description: str | None = None,
+        clear_keyboard: bool = False,
+        clear_segment_filter: bool = False,
+    ) -> NotificationRule:
+        if is_enabled is not None:
+            rule.is_enabled = bool(is_enabled)
+        if template_text is not None:
+            text = template_text.strip()
+            if not text:
+                raise ValueError('template_text must be non-empty')
+            rule.template_text = text
+        if clear_keyboard:
+            rule.template_keyboard_json = None
+        elif template_keyboard_json is not None:
+            rule.template_keyboard_json = template_keyboard_json
+        if cooldown_seconds is not None:
+            if cooldown_seconds < 0:
+                raise ValueError('cooldown_seconds must be >= 0')
+            rule.cooldown_seconds = int(cooldown_seconds)
+        if clear_segment_filter:
+            rule.segment_filter_json = None
+        elif segment_filter_json is not None:
+            rule.segment_filter_json = segment_filter_json
+        if priority is not None:
+            rule.priority = int(priority)
+        if description is not None:
+            rule.description = _normalize_optional_str(description)
+        await self.session.flush()
+        return rule
 
 
 class OutboxRepository:

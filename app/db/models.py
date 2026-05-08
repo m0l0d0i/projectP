@@ -1328,3 +1328,38 @@ class OutboxMessage(TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     correlation_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NotificationRule(TimestampMixin, Base):
+    """Конфигурируемое правило push-уведомления (FEA-NOTIF).
+
+    Каждый сценарий (expiring_3d/low_traffic_90/...) идентифицируется `code`.
+    Админ может выключить правило (is_enabled=False) или переопределить текст
+    и кнопки. При отсутствии правила в БД диспатчер использует вшитый fallback.
+    """
+
+    __tablename__ = 'notification_rules'
+    __table_args__ = (
+        CheckConstraint(
+            'cooldown_seconds >= 0',
+            name='ck_notification_rules_cooldown_non_negative',
+        ),
+        UniqueConstraint('code', name='uq_notification_rules_code'),
+        Index('ix_notification_rules_enabled_priority', 'is_enabled', 'priority'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa_text('true')
+    )
+    template_text: Mapped[str] = mapped_column(Text, nullable=False)
+    template_keyboard_json: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    cooldown_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=sa_text('0')
+    )
+    segment_filter_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, server_default=sa_text('100')
+    )
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)

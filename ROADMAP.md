@@ -46,7 +46,7 @@
 
 ## B+. Smart push-уведомления (D6)
 
-- [ ] **FEA-NOTIF (M, P1).** Smart push-уведомления + админ-панель регулирования. Объединяет `FEA-A16/B25/B26` и формализует существующую логику в `app/services/notifications.py` (`check_expiring/check_low_traffic/check_traffic_exhaustion/check_monthly_traffic_reset`).
+- [~] **FEA-NOTIF (M, P1).** Smart push-уведомления + админ-панель регулирования. Объединяет `FEA-A16/B25/B26` и формализует существующую логику в `app/services/notifications.py` (`check_expiring/check_low_traffic/check_traffic_exhaustion/check_monthly_traffic_reset`). Backend закрыт (миграция `notification_rules` + модель + repo + `NotificationDispatcher`; jobs `check_expiring/check_low_traffic/check_traffic_exhaustion` переведены на dispatcher). Остаётся: admin-UI + новые jobs (`trial_*`/`weekly_usage`).
   - **Анализ существующего:** уже работают флаги `Subscription.notified_3d/notified_1d/notified_low_traffic/notified_exhausted/notified_expired`. Триггеры — APScheduler-задания каждые 6/12 часов.
   - **Backend:**
     - Новая таблица `notification_rules`: `code, is_enabled, template_text, template_keyboard_json, cooldown_seconds, segment_filter_json, priority`. Codes: `expiring_3d/expiring_1d/low_traffic_90/exhausted/trial_mid/trial_last_day/trial_post_expire_rescue/weekly_usage`.

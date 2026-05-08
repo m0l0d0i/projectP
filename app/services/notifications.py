@@ -12,7 +12,6 @@ from app.db.models import AuditAction, AuditActorType, SupportTicketStatus
 from app.db.repositories import (
     AppSettingsRepository,
     AuditLogRepository,
-    OutboxRepository,
     SubscriptionRepository,
     SupportTicketRepository,
     UserRepository,
@@ -20,6 +19,7 @@ from app.db.repositories import (
 from app.keyboards.inline import low_traffic_alert_keyboard
 from app.observability.metrics import SUPPORT_TICKETS_CLOSED
 from app.services.marzban import MarzbanAPIError, MarzbanClient, MarzbanUser
+from app.services.notification_dispatcher import NotificationDispatcher
 from app.services.subscription_urls import canonicalize_subscription_url_from_settings
 from app.services.subscriptions import SubscriptionService
 from app.utils.runtime_settings import effective_optional_int_from_row
@@ -133,7 +133,21 @@ async def _load_support_chat_id(sessionmaker: async_sessionmaker, settings: Sett
     return int(settings.support_chat_id)
 
 
-async def check_expiring(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
+_FALLBACK_EXPIRING_3D = '⚠️ Ваша подписка истекает через 3 дня!'
+_FALLBACK_EXPIRING_1D = '🔥 Ваша подписка истекает уже завтра!'
+_FALLBACK_EXPIRED = '❌ Ваша подписка истекла. Доступ к VPN приостановлен.\nПожалуйста, продлите тариф.'
+_FALLBACK_LOW_TRAFFIC = '⚠️ Осталось меньше 10% трафика. Вы можете докупить трафик или продлить тариф досрочно.'
+_FALLBACK_EXHAUSTED = '📉 <b>Ваш трафик почти исчерпан!</b>\nVPN скоро перестанет работать. Вы можете докупить трафик или досрочно продлить тариф.'
+
+
+async def check_expiring(
+    bot,
+    sessionmaker: async_sessionmaker,
+    settings: Settings,
+    marzban: MarzbanClient,
+    dispatcher: NotificationDispatcher | None = None,
+) -> None:
+    dispatcher = dispatcher or NotificationDispatcher()
     now = datetime.now(timezone.utc)
 
     for target in await _load_active_targets(sessionmaker):
@@ -155,34 +169,48 @@ async def check_expiring(bot, sessionmaker: async_sessionmaker, settings: Settin
                 continue
 
             time_left = expire_at - now
-            notify_text: str | None = None
+            rule_code: str | None = None
+            fallback_text: str | None = None
             correlation_kind: str | None = None
 
             if time_left.total_seconds() <= 0:
                 subscription.is_active = False
                 if not subscription.notified_expired:
-                    notify_text = '❌ Ваша подписка истекла. Доступ к VPN приостановлен.\nПожалуйста, продлите тариф.'
+                    rule_code = 'expired'
+                    fallback_text = _FALLBACK_EXPIRED
                     correlation_kind = 'expired'
                     subscription.notified_expired = True
             elif timedelta(days=2) < time_left <= timedelta(days=3) and not subscription.notified_3d:
-                notify_text = '⚠️ Ваша подписка истекает через 3 дня!'
+                rule_code = 'expiring_3d'
+                fallback_text = _FALLBACK_EXPIRING_3D
                 correlation_kind = 'expiry_3d'
                 subscription.notified_3d = True
             elif timedelta(days=0) < time_left <= timedelta(days=1) and not subscription.notified_1d:
-                notify_text = '🔥 Ваша подписка истекает уже завтра!'
+                rule_code = 'expiring_1d'
+                fallback_text = _FALLBACK_EXPIRING_1D
                 correlation_kind = 'expiry_1d'
                 subscription.notified_1d = True
 
-            if notify_text and correlation_kind:
-                await OutboxRepository(session).enqueue_tg_message(
+            if rule_code and fallback_text and correlation_kind:
+                await dispatcher.dispatch(
+                    session=session,
+                    code=rule_code,
                     chat_id=target.user_tg_id,
-                    text=notify_text,
                     user_id=target.user_id,
+                    default_text=fallback_text,
+                    context={'subscription_id': target.subscription_id},
                     correlation_key=f'subscription:{target.subscription_id}:{correlation_kind}',
                 )
 
 
-async def check_low_traffic(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
+async def check_low_traffic(
+    bot,
+    sessionmaker: async_sessionmaker,
+    settings: Settings,
+    marzban: MarzbanClient,
+    dispatcher: NotificationDispatcher | None = None,
+) -> None:
+    dispatcher = dispatcher or NotificationDispatcher()
     now = datetime.now(timezone.utc)
 
     for target in await _load_active_targets(sessionmaker):
@@ -209,16 +237,26 @@ async def check_low_traffic(bot, sessionmaker: async_sessionmaker, settings: Set
                 continue
 
             subscription.notified_low_traffic = True
-            await OutboxRepository(session).enqueue_tg_message(
+            await dispatcher.dispatch(
+                session=session,
+                code='low_traffic_90',
                 chat_id=target.user_tg_id,
-                text='⚠️ Осталось меньше 10% трафика. Вы можете докупить трафик или продлить тариф досрочно.',
-                reply_markup=low_traffic_alert_keyboard(target.subscription_id),
                 user_id=target.user_id,
+                default_text=_FALLBACK_LOW_TRAFFIC,
+                default_reply_markup=low_traffic_alert_keyboard(target.subscription_id),
+                context={'subscription_id': target.subscription_id},
                 correlation_key=f'subscription:{target.subscription_id}:low_traffic',
             )
 
 
-async def check_traffic_exhaustion(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
+async def check_traffic_exhaustion(
+    bot,
+    sessionmaker: async_sessionmaker,
+    settings: Settings,
+    marzban: MarzbanClient,
+    dispatcher: NotificationDispatcher | None = None,
+) -> None:
+    dispatcher = dispatcher or NotificationDispatcher()
     now = datetime.now(timezone.utc)
 
     for target in await _load_active_targets(sessionmaker):
@@ -244,12 +282,15 @@ async def check_traffic_exhaustion(bot, sessionmaker: async_sessionmaker, settin
                 continue
 
             subscription.notified_exhausted = True
-            await OutboxRepository(session).enqueue_tg_message(
+            await dispatcher.dispatch(
+                session=session,
+                code='traffic_exhausted',
                 chat_id=target.user_tg_id,
-                text='📉 <b>Ваш трафик почти исчерпан!</b>\nVPN скоро перестанет работать. Вы можете докупить трафик или досрочно продлить тариф.',
-                parse_mode='HTML',
-                reply_markup=low_traffic_alert_keyboard(target.subscription_id),
                 user_id=target.user_id,
+                default_text=_FALLBACK_EXHAUSTED,
+                default_parse_mode='HTML',
+                default_reply_markup=low_traffic_alert_keyboard(target.subscription_id),
+                context={'subscription_id': target.subscription_id},
                 correlation_key=f'subscription:{target.subscription_id}:traffic_exhausted',
             )
 

@@ -32,6 +32,7 @@ from app.middlewares.db import DbSessionMiddleware
 from app.middlewares.services import ServicesMiddleware
 from app.observability.metrics import BOT_UP
 from app.scheduler import SchedulerLeader, build_scheduler
+from app.services.notification_dispatcher import NotificationDispatcher
 from app.services.anti_spam import AntiSpamService
 from app.services.cache import CacheService
 from app.services.marzban import MarzbanClient
@@ -556,7 +557,21 @@ async def main() -> None:
                 ttl_seconds=settings.scheduler_leader_lock_ttl_seconds,
             )
             if await scheduler_leader.start():
-                scheduler = build_scheduler(bot, sessionmaker, settings, marzban)
+                redis_for_notif = (
+                    getattr(cache, 'redis', None)
+                    or getattr(cache, 'client', None)
+                )
+                notification_dispatcher = NotificationDispatcher(
+                    redis_client=redis_for_notif,
+                    redis_prefix=settings.redis_prefix,
+                )
+                scheduler = build_scheduler(
+                    bot,
+                    sessionmaker,
+                    settings,
+                    marzban,
+                    notification_dispatcher=notification_dispatcher,
+                )
                 scheduler.start()
                 scheduler_state_info = _scheduler_runtime_state(
                     running=True,
