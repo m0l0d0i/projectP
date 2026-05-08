@@ -26,9 +26,10 @@
 - [x] **SEC-H3.** Платега-callback: `getattr(settings, 'platega_secret_value', None) or getattr(settings, 'platega_secret', None)` — если первый `None`, во второй ветке `str(SecretStr_obj)` вернёт `'**********'`, и сравнение секретов превращается в `compare_digest('**********', X-Secret)`. Закрыто 2026-05-07 (commit `0d39f99`).
   - **Файлы:** `app/webhooks.py:218-232`, `app/services/payment_polling.py:80`, `app/services/payments/platega.py:124-125`
   - **Что сделать:** убрать fallback, fail-closed (503), использовать только `settings.platega_secret_value`.
-- [ ] **SEC-H4.** Self-XSS / HTML-injection в админ-странице инвойса: HTML собирается f-строками, `html.escape` руками — паттерн хрупкий, отсутствует CSP.
+- [~] **SEC-H4.** Self-XSS / HTML-injection в админ-странице инвойса: HTML собирается f-строками, `html.escape` руками — паттерн хрупкий, отсутствует CSP.
   - **Файлы:** `app/web/routes.py:1674-1735` (и весь блок ниже)
   - **Что сделать:** перенести страницу на `templates.TemplateResponse` (Jinja autoescape уже включён в `app/web/app.py:71-79`); добавить CSP без `unsafe-inline`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`.
+  - Частично закрыто 2026-05-07: добавлены security-заголовки на все admin-ответы (CSP, X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy: same-origin, HSTS на HTTPS). CSP пока с `'unsafe-inline'` для style/script — нужен audit и чистка inline-блоков в `admin_*.html` + перенос invoice f-string'а на Jinja, после чего `unsafe-inline` убирается.
 - [ ] **SEC-H5.** Admin-роль проверяется в каждом хэндлере вручную (162 повторения), при ошибке загрузки `AppSettings` в `_load_admin_ids` исключение глотается без алерта.
   - **Файлы:** `app/handlers/admin_panel.py:80-89` и далее
   - **Что сделать:** заменить на router-level filter/middleware; логировать `logger.error` при degraded path; вынести admin_ids в Redis-кэш.

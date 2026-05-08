@@ -25,6 +25,21 @@ logger = logging.getLogger(__name__)
 _ADMIN_CSRF_COOKIE = 'web_admin_csrf'
 _ADMIN_MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
+# CSP for admin pages.
+# 'unsafe-inline' для style/script оставлен временно — текущие admin_*.html
+# содержат inline-style и inline-script. После переноса invoice-страницы и
+# чистки inline-блоков эти токены нужно убрать (full SEC-H4 follow-up).
+_ADMIN_CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "font-src 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'"
+)
+
 
 def _csrf_input(request: Request) -> str:
     token = request.cookies.get(_ADMIN_CSRF_COOKIE, '')
@@ -207,6 +222,14 @@ def create_fastapi_app(*, sessionmaker, settings) -> FastAPI:
         response = await call_next(request)
         if is_admin_surface:
             response.headers.setdefault('Cache-Control', 'no-store')
+            response.headers.setdefault('X-Frame-Options', 'DENY')
+            response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+            response.headers.setdefault('Referrer-Policy', 'same-origin')
+            response.headers.setdefault('Content-Security-Policy', _ADMIN_CSP)
+            if request.url.scheme == 'https':
+                response.headers.setdefault(
+                    'Strict-Transport-Security', 'max-age=31536000; includeSubDomains'
+                )
             if request.method in {'GET', 'HEAD'}:
                 _ensure_admin_csrf_cookie(request, response)
         return response
