@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
-from app.db.models import InvoicePurpose, InvoiceStatus
+from app.db.models import InvoiceStatus
 from app.db.repositories import InvoiceRepository
 from app.services.marzban import MarzbanClient
 from app.services.payment_engine import PaymentService
@@ -24,14 +23,6 @@ class ProviderPollSnapshot:
     normalized_status: str
     raw_status: str | None = None
     payload: dict[str, Any] | None = None
-
-
-def _topup_success_text(amount: Decimal) -> str:
-    return f'✅ Ваш баланс успешно пополнен на {amount} ₽.'
-
-
-def _invoice_success_text(invoice_id: int) -> str:
-    return f'✅ Платеж по счету #{invoice_id} подтвержден.'
 
 
 def _normalize_provider_status(value: str | None) -> str:
@@ -121,8 +112,6 @@ async def process_pending_platega_invoices(bot, sessionmaker: async_sessionmaker
                 )
                 continue
 
-            notify_tg_id: int | None = None
-            notify_text: str | None = None
             try:
                 async with sessionmaker() as session:
                     service = PaymentService(
@@ -156,19 +145,10 @@ async def process_pending_platega_invoices(bot, sessionmaker: async_sessionmaker
                         continue
 
                     invoice_after = result.invoice
-                    should_notify = (
-                        provider_snapshot.normalized_status == 'paid'
-                        and not result.already_processed
-                        and invoice_after.status == InvoiceStatus.consumed
-                    )
-                    if should_notify:
-                        user = await service.users.get_by_id(invoice_after.user_id)
-                        notify_tg_id = user.tg_id if user is not None else None
-                        if notify_tg_id is not None:
-                            if invoice_after.purpose == InvoicePurpose.balance_topup:
-                                notify_text = _topup_success_text(invoice_after.payable_amount)
-                            else:
-                                notify_text = _invoice_success_text(invoice_after.id)
+                    # Уведомление пользователя об успешной оплате теперь
+                    # ставится в outbox в `_consume_paid_invoice` (OPS-4),
+                    # в той же транзакции что и `invoice.status = consumed`.
+                    # См. app/services/payment_engine.py.
 
                     logger.info(
                         'Platega polling processed invoice=%s external_id=%s resolved_external_id=%s provider_status=%s raw_status=%s result_status=%s invoice_status=%s already_processed=%s',
@@ -190,16 +170,6 @@ async def process_pending_platega_invoices(bot, sessionmaker: async_sessionmaker
                     provider_snapshot.raw_status,
                 )
                 continue
-
-            if notify_tg_id and notify_text:
-                try:
-                    await bot.send_message(notify_tg_id, notify_text)
-                except Exception:
-                    logger.exception(
-                        'Failed to notify user about processed Platega invoice=%s tg_id=%s',
-                        invoice.id,
-                        notify_tg_id,
-                    )
     finally:
         await marzban.close()
         await provider.close()

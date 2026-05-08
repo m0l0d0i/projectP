@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 import string
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import case, func, or_, select
@@ -25,6 +25,9 @@ from app.db.models import (
     InvoicePurpose,
     InvoiceStatus,
     MarzbanPageSettings,
+    OutboxKind,
+    OutboxMessage,
+    OutboxStatus,
     PricingRule,
     PromoCode,
     PromoRedemption,
@@ -2928,3 +2931,112 @@ class MarzbanPageSettingsRepository:
         row.show_qr_button = bool(show_qr_button)
         await self.session.flush()
         return row
+
+
+class OutboxRepository:
+    """Transactional outbox for guaranteed-delivery side effects (OPS-4).
+
+    Producers call `enqueue_*` inside the same transaction that commits the
+    triggering domain change (e.g. invoice → consumed). Workers call
+    `claim_due` to lock pending rows with `FOR UPDATE SKIP LOCKED`, then
+    `mark_sent` / `mark_failed` after the side effect completes.
+    """
+
+    DEFAULT_MAX_ATTEMPTS = 10
+    BACKOFF_SCHEDULE_SECONDS: tuple[int, ...] = (5, 15, 60, 300, 900, 1800, 3600, 7200, 14400, 28800)
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def enqueue_tg_message(
+        self,
+        *,
+        chat_id: int,
+        text: str,
+        parse_mode: str | None = None,
+        disable_web_page_preview: bool | None = None,
+        correlation_key: str | None = None,
+        max_attempts: int | None = None,
+    ) -> OutboxMessage | None:
+        """Enqueue a Telegram text message. Returns the row, or None on
+        correlation_key conflict (treated as already-enqueued duplicate)."""
+        payload: dict = {'text': text}
+        if parse_mode is not None:
+            payload['parse_mode'] = parse_mode
+        if disable_web_page_preview is not None:
+            payload['disable_web_page_preview'] = bool(disable_web_page_preview)
+
+        row = OutboxMessage(
+            kind=OutboxKind.tg_message,
+            target_chat_id=chat_id,
+            payload_json=payload,
+            status=OutboxStatus.pending,
+            attempts=0,
+            max_attempts=max_attempts if max_attempts is not None else self.DEFAULT_MAX_ATTEMPTS,
+            next_attempt_at=datetime.now(timezone.utc),
+            correlation_key=correlation_key,
+        )
+        self.session.add(row)
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            if correlation_key is not None and 'uq_outbox_messages_correlation_key' in str(exc.orig):
+                await self.session.rollback()
+                return None
+            raise
+        return row
+
+    async def claim_due(self, *, limit: int = 50) -> list[OutboxMessage]:
+        """Atomically claim up to `limit` pending rows for the worker.
+
+        Uses `FOR UPDATE SKIP LOCKED` so multiple workers don't fight.
+        Status is flipped to `processing` and saved before returning.
+        """
+        now = datetime.now(timezone.utc)
+        stmt = (
+            select(OutboxMessage)
+            .where(
+                OutboxMessage.status == OutboxStatus.pending,
+                OutboxMessage.next_attempt_at <= now,
+            )
+            .order_by(OutboxMessage.next_attempt_at.asc(), OutboxMessage.id.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        for row in rows:
+            row.status = OutboxStatus.processing
+            row.attempts += 1
+            row.updated_at = now
+        await self.session.flush()
+        return rows
+
+    async def mark_sent(self, message_id: int) -> None:
+        now = datetime.now(timezone.utc)
+        row = await self.session.get(OutboxMessage, message_id)
+        if row is None:
+            return
+        row.status = OutboxStatus.sent
+        row.processed_at = now
+        row.updated_at = now
+        row.last_error = None
+        await self.session.flush()
+
+    async def mark_failed(self, message_id: int, error: str, *, dead: bool = False) -> None:
+        now = datetime.now(timezone.utc)
+        row = await self.session.get(OutboxMessage, message_id)
+        if row is None:
+            return
+
+        if dead or row.attempts >= row.max_attempts:
+            row.status = OutboxStatus.dead
+            row.processed_at = now
+        else:
+            backoff_idx = min(row.attempts - 1, len(self.BACKOFF_SCHEDULE_SECONDS) - 1)
+            backoff = self.BACKOFF_SCHEDULE_SECONDS[max(0, backoff_idx)]
+            row.status = OutboxStatus.pending
+            row.next_attempt_at = now + timedelta(seconds=backoff)
+
+        row.last_error = (error or '')[:2000]
+        row.updated_at = now
+        await self.session.flush()

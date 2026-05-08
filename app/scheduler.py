@@ -19,6 +19,7 @@ from app.services.notifications import (
     check_support_ticket_auto_close,
     check_traffic_exhaustion,
 )
+from app.services.outbox import OutboxDispatcher
 from app.services.payment_polling import process_pending_platega_invoices
 
 logger = logging.getLogger(__name__)
@@ -262,6 +263,20 @@ def build_scheduler(bot, sessionmaker, settings: Settings, marzban: MarzbanClien
             max_instances=1,
             misfire_grace_time=60,
         )
+
+    outbox_dispatcher = OutboxDispatcher(bot=bot, sessionmaker=sessionmaker)
+    scheduler.add_job(
+        outbox_dispatcher.tick,
+        'interval',
+        seconds=int(getattr(settings, 'outbox_dispatcher_interval_seconds', 5)),
+        next_run_time=_utcnow(),
+        id='outbox_dispatcher',
+        name='outbox_dispatcher',
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=30,
+    )
 
     logger.info(
         'Scheduler configured: jobs=%s',

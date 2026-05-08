@@ -80,6 +80,18 @@ class BroadcastDeliveryStatus(str, enum.Enum):
     bot_blocked = 'bot_blocked'
 
 
+class OutboxStatus(str, enum.Enum):
+    pending = 'pending'
+    processing = 'processing'
+    sent = 'sent'
+    failed = 'failed'
+    dead = 'dead'
+
+
+class OutboxKind(str, enum.Enum):
+    tg_message = 'tg_message'
+
+
 class TariffPricingMode(str, enum.Enum):
     fixed = 'fixed'
     constructor = 'constructor'
@@ -1274,3 +1286,45 @@ class AuditLog(TimestampMixin, Base):
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     entity_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=sa_text("'{}'::json"))
+
+
+class OutboxMessage(TimestampMixin, Base):
+    __tablename__ = 'outbox_messages'
+    __table_args__ = (
+        CheckConstraint('attempts >= 0', name='ck_outbox_attempts_non_negative'),
+        CheckConstraint('max_attempts > 0', name='ck_outbox_max_attempts_positive'),
+        Index('ix_outbox_messages_due', 'status', 'next_attempt_at', 'id'),
+        Index(
+            'uq_outbox_messages_correlation_key',
+            'correlation_key',
+            unique=True,
+            postgresql_where=sa_text('correlation_key IS NOT NULL'),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[OutboxKind] = mapped_column(
+        Enum(OutboxKind, name='outbox_kind'),
+        nullable=False,
+    )
+    target_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default=sa_text("'{}'::json")
+    )
+    status: Mapped[OutboxStatus] = mapped_column(
+        Enum(OutboxStatus, name='outbox_status'),
+        nullable=False,
+        default=OutboxStatus.pending,
+        server_default=sa_text("'pending'"),
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=sa_text('0'))
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=10, server_default=sa_text('10'))
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=sa_text('CURRENT_TIMESTAMP'),
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    correlation_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

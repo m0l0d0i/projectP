@@ -22,6 +22,7 @@ from app.db.models import (
 from app.db.repositories import (
     AuditLogRepository,
     InvoiceRepository,
+    OutboxRepository,
     SubscriptionRepository,
     TransactionRepository,
     UserRepository,
@@ -933,6 +934,22 @@ class PaymentService:
                 'tariff_plan_id': getattr(invoice, 'tariff_plan_id', None),
             },
         )
+
+        # OPS-4: ставим уведомление пользователя в outbox в той же транзакции,
+        # что переводит invoice → consumed. correlation_key защищает от
+        # повторной постановки если этот же invoice второй раз попадёт сюда
+        # (двойной callback, retry polling и т.п.).
+        if user.tg_id is not None:
+            if invoice.purpose == InvoicePurpose.balance_topup:
+                notify_text = f'✅ Ваш баланс успешно пополнен на {invoice.payable_amount} ₽.'
+            else:
+                notify_text = f'✅ Платеж по счету #{invoice.id} подтвержден.'
+            await OutboxRepository(self.session).enqueue_tg_message(
+                chat_id=user.tg_id,
+                text=notify_text,
+                correlation_key=f'invoice:{invoice.id}:paid',
+            )
+
         await self.session.flush()
         PAYMENTS_CONSUMED.labels(purpose=invoice.purpose.value).inc()
         return ProcessInvoiceResult(invoice=invoice, already_processed=False, status_text='consumed')
