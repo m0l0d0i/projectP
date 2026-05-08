@@ -13,7 +13,6 @@ import secrets
 import ipaddress
 import shlex
 import shutil
-import subprocess
 import tempfile
 import time
 from contextlib import suppress

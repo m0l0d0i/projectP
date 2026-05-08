@@ -52,7 +52,7 @@
 
 - [ ] **SEC-L1.** Удалить `curl` из runtime-образа (используется только в healthcheck) — заменить на python-based check (`Dockerfile:26`).
 - [ ] **SEC-L2.** Нет lockfile (`requirements.txt` `>=` only) — supply-chain risk. Перейти на `pip-tools` / `uv pip compile` (см. также QC-9.1 в [CODE_QUALITY.md](CODE_QUALITY.md)).
-- [ ] **SEC-L3.** Удалить мёртвый импорт `import subprocess` в `app/web/routes.py:16`.
+- [x] **SEC-L3.** Удалить мёртвый импорт `import subprocess` в `app/web/routes.py:16`. Закрыто 2026-05-07: top-level `subprocess` использовался только через `asyncio.subprocess.PIPE` (а тот доступен через сам `asyncio`-пакет).
 - [ ] **SEC-L4.** Без CSP / `X-Frame-Options` / `X-Content-Type-Options` на admin-страницах.
 - [ ] **SEC-L5.** `audit.log` хранит 30 дней админских действий с деталями инвойсов — убедиться в шифровании диска.
 - [ ] **SEC-L6.** `_prune_backups` использует glob по `path.name` — сегодня безопасно (timestamp suffix), но при добавлении путей вручную проверять отсутствие `*`.
