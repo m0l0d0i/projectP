@@ -4411,6 +4411,18 @@ async def admin_marzban_page_apply(request: Request):
     )
 
 
+_MARZBAN_PREVIEW_CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data: https:; "
+    "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; "
+    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; "
+    "font-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'"
+)
+
+
 @router.get('/admin/marzban-page/preview', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
 async def admin_marzban_page_preview(request: Request):
     sessionmaker = request.app.state.sessionmaker
@@ -4420,7 +4432,13 @@ async def admin_marzban_page_preview(request: Request):
         async with sessionmaker.begin() as session:
             renderer = MarzbanTemplateRenderer(session, settings)
             render_result = await renderer.render_preview()
-        return HTMLResponse(render_result.rendered_html, status_code=200)
+        # Preview рендерит публичный Marzban-template с inline-style/script
+        # и Tailwind CDN. Под admin CSP это бы заблокировало контент;
+        # ставим relaxed CSP только на этот один роут (само admin-UI остаётся
+        # под strict CSP middleware'а).
+        response = HTMLResponse(render_result.rendered_html, status_code=200)
+        response.headers['Content-Security-Policy'] = _MARZBAN_PREVIEW_CSP
+        return response
     except Exception as exc:
         escaped = html.escape(str(exc))
         body = f"""<!doctype html>
@@ -4428,15 +4446,9 @@ async def admin_marzban_page_preview(request: Request):
   <head>
     <meta charset='utf-8'>
     <title>Marzban preview failed</title>
-    <style>
-      body {{ font-family: Inter, Arial, sans-serif; background: #020617; color: #e2e8f0; margin: 0; padding: 32px; }}
-      .card {{ max-width: 920px; margin: 0 auto; background: #0f172a; border: 1px solid #334155; border-radius: 20px; padding: 24px; }}
-      h1 {{ margin-top: 0; font-size: 24px; }}
-      p {{ color: #94a3b8; line-height: 1.6; }}
-      pre {{ white-space: pre-wrap; word-break: break-word; background: #020617; border: 1px solid #334155; border-radius: 14px; padding: 16px; color: #fda4af; }}
-    </style>
+    <link rel='stylesheet' href='/static/admin.css'>
   </head>
-  <body>
+  <body class='preview-error-page'>
     <div class='card'>
       <h1>❌ Preview render failed</h1>
       <p>Jinja preview or Marzban page context build failed. The admin page should still stay usable; fix the error below and reload preview.</p>

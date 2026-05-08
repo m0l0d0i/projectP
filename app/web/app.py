@@ -25,20 +25,21 @@ logger = logging.getLogger(__name__)
 _ADMIN_CSRF_COOKIE = 'web_admin_csrf'
 _ADMIN_MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
-# CSP for admin pages.
-# script-src: 'unsafe-inline' убран; все JS вынесен в /static/admin.js +
-# /static/admin_broadcasts.js (no inline event handlers — для confirm-диалогов
-# используются data-confirm + delegated listener в admin.js). Tailwind CDN
-# в whitelist.
-# style-src: 'unsafe-inline' остаётся, потому что Tailwind Play CDN инжектит
-# сгенерированный CSS в <style> в runtime; а ещё в шаблонах и f-string'ах
-# routes.py много inline style="..." attribute'ов. Полное removal требует
-# build-step Tailwind в статический CSS — отдельная задача.
+# CSP for admin pages — strict, без `'unsafe-inline'` для script-src и style-src.
+#   script-src 'self': все JS — внешние файлы в /static/, никаких inline
+#     event handlers (для confirm-диалогов — data-confirm + delegated listener
+#     в /static/admin.js).
+#   style-src 'self': Tailwind собран статически через standalone CLI в
+#     `/static/tailwind.css` (см. `app/static/src/tailwind.input.css`); ни
+#     одного inline `style="..."` в admin-шаблонах нет.
+# Исключение: `/admin/marzban-page/preview` рендерит публичный Marzban-template
+# с inline-style/script и Tailwind CDN — этот единственный роут переопределяет
+# CSP-заголовок на relaxed-вариант (см. `_MARZBAN_PREVIEW_CSP` в routes.py).
 _ADMIN_CSP = (
     "default-src 'self'; "
     "img-src 'self' data:; "
-    "style-src 'self' 'unsafe-inline'; "
-    "script-src 'self' https://cdn.tailwindcss.com; "
+    "style-src 'self'; "
+    "script-src 'self'; "
     "font-src 'self'; "
     "form-action 'self'; "
     "frame-ancestors 'none'; "

@@ -559,7 +559,11 @@ class MarzbanClient:
             try:
                 nodes.append(self._parse_node(item))
             except Exception as exc:
-                logger.warning('Skipping malformed Marzban node payload: %s payload=%r', exc, item)
+                node_hint = None
+                if isinstance(item, dict):
+                    node_hint = item.get('id') or item.get('node_id') or item.get('uuid') or item.get('name')
+                logger.warning('Skipping malformed Marzban node payload: %s node_hint=%r', exc, node_hint)
+                logger.debug('Malformed Marzban node full payload=%r', item)
         return nodes
 
     async def sync_node_registry(self, session: AsyncSession) -> NodeRegistrySyncResult:
