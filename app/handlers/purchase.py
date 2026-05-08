@@ -442,7 +442,7 @@ async def balance_amount_callbacks(
             await _handle_duplicate_invoice(
                 callback,
                 action='create_balance_topup_invoice',
-                user_tg_id=user.tg_id,
+                user_tg_id=callback.from_user.id if callback.from_user else None,
                 exc=exc,
             )
             return
@@ -747,7 +747,7 @@ async def choose_months(
         await _handle_duplicate_invoice(
             callback,
             action='create_tariff_invoice',
-            user_tg_id=user.tg_id,
+            user_tg_id=callback.from_user.id if callback.from_user else None,
             exc=exc,
         )
         return
@@ -789,7 +789,7 @@ async def buy_topup(
         await _handle_duplicate_invoice(
             callback,
             action='create_topup_invoice',
-            user_tg_id=user.tg_id,
+            user_tg_id=callback.from_user.id if callback.from_user else None,
             exc=exc,
         )
         return

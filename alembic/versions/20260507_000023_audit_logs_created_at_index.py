@@ -23,7 +23,7 @@ TABLE_NAME = 'audit_logs'
 def upgrade() -> None:
     op.execute(
         f'CREATE INDEX IF NOT EXISTS {INDEX_NAME} '
-        f'ON {TABLE_NAME} (created_at DESC, id DESC)'
+        f'ON {TABLE_NAME} (created_at, id)'
     )
 
 

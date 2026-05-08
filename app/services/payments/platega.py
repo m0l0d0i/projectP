@@ -21,8 +21,9 @@ def _platega_breaker_is_failure(exc: BaseException) -> bool:
     if isinstance(exc, (aiohttp.ClientConnectionError, asyncio.TimeoutError)):
         return True
     if isinstance(exc, PaymentProviderError):
-        msg = str(exc)
-        return 'HTTP 5' in msg or 'невалидный JSON' in msg
+        # status_code None = transport/parse error (counts as failure);
+        # 5xx = server failure; 4xx = client mistake (НЕ failure).
+        return exc.status_code is None or exc.status_code >= 500
     return False
 
 logger = logging.getLogger(__name__)
@@ -333,7 +334,10 @@ class PlategaProvider(PaymentProvider):
                             normalized_path,
                             text[:1000],
                         )
-                        raise PaymentProviderError(f'Platega вернула HTTP {response_status}: {text[:300]}')
+                        raise PaymentProviderError(
+                            f'Platega вернула HTTP {response_status}: {text[:300]}',
+                            status_code=response_status,
+                        )
                     else:
                         if not text.strip():
                             PAYMENT_REQUESTS.labels(provider='platega', result='empty_response').inc()

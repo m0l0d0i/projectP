@@ -798,6 +798,7 @@ class PaymentService:
 
         if invoice.external_invoice_id and previous_amount != new_payable_amount:
             invoice.status = InvoiceStatus.cancelled
+            invoice.idempotency_key = None
             await self.audit.create(
                 action=AuditAction.invoice_cancelled,
                 actor_type=AuditActorType.user,
@@ -860,6 +861,7 @@ class PaymentService:
             return
 
         invoice.status = InvoiceStatus.cancelled
+        invoice.idempotency_key = None
         await self.audit.create(
             action=AuditAction.invoice_cancelled,
             actor_type=actor_type,
@@ -1078,6 +1080,7 @@ class PaymentService:
             raise ValueError('Счет уже в обработке или завершен — отмена недоступна')
 
         invoice.status = InvoiceStatus.cancelled
+        invoice.idempotency_key = None
         await self.audit.create(
             action=AuditAction.invoice_cancelled,
             actor_type=AuditActorType.user,
@@ -1135,6 +1138,7 @@ class PaymentService:
             return invoice
 
         invoice.status = InvoiceStatus.cancelled
+        invoice.idempotency_key = None
         await self.audit.create(
             action=AuditAction.admin_action,
             actor_type=AuditActorType.admin,

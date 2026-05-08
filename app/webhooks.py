@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 from contextlib import suppress
@@ -40,6 +41,46 @@ class PlategaCallbackEnvelope:
 
 _PLATEGA_PAID_STATUSES = {'CONFIRMED', 'PAID', 'SUCCESS', 'SUCCEEDED'}
 _PLATEGA_CANCELLED_STATUSES = {'CANCELED', 'CANCELLED', 'CHARGEBACKED', 'FAILED', 'ERROR', 'EXPIRED'}
+
+_PLATEGA_CALLBACK_RATE_LIMIT = 60
+_PLATEGA_CALLBACK_RATE_WINDOW_SECONDS = 60
+_PLATEGA_CALLBACK_RATE_BLOCK_SECONDS = 60
+
+
+def _client_ip_bucket_key(request: web.Request) -> int:
+    """Stable int bucket key from client IP for rate-limit storage.
+
+    Uses request.remote (nearest hop). Behind nginx this becomes the proxy
+    IP — still a useful coarse key. Truncated SHA-256 → unsigned 63-bit int.
+    """
+    remote = request.remote or 'unknown'
+    digest = hashlib.sha256(remote.encode('utf-8')).digest()
+    return int.from_bytes(digest[:8], 'big', signed=False) >> 1
+
+
+async def _rate_limit_callback(
+    request: web.Request,
+    event_kind: str,
+    *,
+    limit: int,
+    window_seconds: int,
+    block_seconds: int,
+) -> tuple[bool, int]:
+    """Returns (allowed, retry_after_seconds). Fail-open if cache is unavailable."""
+    cache = request.app.get('cache')
+    if cache is None:
+        return True, 0
+    try:
+        return await cache.check_rate_limit(
+            _client_ip_bucket_key(request),
+            event_kind,
+            limit=limit,
+            window_seconds=window_seconds,
+            block_seconds=block_seconds,
+        )
+    except Exception:
+        logger.exception('Rate-limit check failed for %s; fail-open', event_kind)
+        return True, 0
 
 
 def _metrics_label_path(request: web.Request) -> str:
@@ -214,6 +255,23 @@ async def platega_callback(request: web.Request) -> web.Response:
     if settings.payment_provider != 'platega':
         logger.warning('Platega callback rejected: payment provider is %s', settings.payment_provider)
         return web.Response(status=404, text='provider disabled')
+
+    allowed, retry_after = await _rate_limit_callback(
+        request,
+        'platega_callback',
+        limit=_PLATEGA_CALLBACK_RATE_LIMIT,
+        window_seconds=_PLATEGA_CALLBACK_RATE_WINDOW_SECONDS,
+        block_seconds=_PLATEGA_CALLBACK_RATE_BLOCK_SECONDS,
+    )
+    if not allowed:
+        logger.warning(
+            'Platega callback rate-limited: remote=%s retry_after=%s',
+            request.remote,
+            retry_after,
+        )
+        response = web.Response(status=429, text='rate limited')
+        response.headers['Retry-After'] = str(retry_after)
+        return response
 
     platega_secret = settings.platega_secret_value
     if not settings.platega_merchant_id or not platega_secret:
