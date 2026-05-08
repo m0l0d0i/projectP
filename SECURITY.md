@@ -39,8 +39,9 @@
 - [ ] **SEC-M1.** Subprocess исполнение `marzban_restart_command` / `xray_test_command` из настроек — сегодня env-only; запретить редактирование через web UI (allow-list команд).
 - [ ] **SEC-M2.** CSRF cookie `secure` вычисляется из `request.url.scheme`; за TLS-терминирующим nginx даёт non-Secure. Доверять `X-Forwarded-Proto` от перечисленных прокси. CSRF-токен не ротируется при смене сессии.
 - [ ] **SEC-M3.** Документировать двухсерверную архитектуру (FastAPI admin vs aiohttp public webhooks) комментарием в `app/web/app.py`, чтобы случайно не подсадить публичный роут под IP-allowlist.
-- [ ] **SEC-M4.** Логирование полного payload Платеги (с amount, transactionId, может включать PII) в `bot.log` — снизить до DEBUG, оставить в WARN только хэш/префикс tx-id и `normalized_status`.
+- [~] **SEC-M4.** Логирование полного payload Платеги (с amount, transactionId, может включать PII) в `bot.log` — снизить до DEBUG, оставить в WARN только хэш/префикс tx-id и `normalized_status`.
   - **Файл:** `app/webhooks.py:242,262-268`, аналогично `app/services/marzban.py:536`
+  - Частично закрыто 2026-05-07: в `app/webhooks.py` добавлен `_sanitize_tx_ids` (первые 8 символов + ellipsis), полные payload'ы Платеги переведены с WARN на DEBUG, на WARN/INFO/EXCEPTION — только sanitized tx-id префиксы + `normalized_status` + `raw_status`. `app/services/marzban.py:562` (malformed node payload) — отдельно, низкий приоритет (это конфиг-данные, не PII).
 - [ ] **SEC-M5.** Marzban-auth ошибка содержит `response.text` — может утекать в Sentry.
   - **Файл:** `app/services/marzban.py:289-291`
 - [ ] **SEC-M6.** `MarzbanClient._request` ретраит POST/PUT на сетевых таймаутах → возможны дубли (mit `UserAlreadyExistsError`, но всё равно опасно). Ретраить только GET, либо использовать idempotency-ключ.

@@ -46,6 +46,25 @@ _PLATEGA_CALLBACK_RATE_LIMIT = 60
 _PLATEGA_CALLBACK_RATE_WINDOW_SECONDS = 60
 _PLATEGA_CALLBACK_RATE_BLOCK_SECONDS = 60
 
+_TX_ID_PREFIX_LEN = 8
+
+
+def _sanitize_tx_ids(tx_ids: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+    """Return tuple of safe-to-log prefixes (first 8 chars + '...').
+
+    Keeps logs queryable by support without exposing full transaction IDs
+    (which Platega may share with the buyer; treat as semi-secret).
+    """
+    if not tx_ids:
+        return ()
+    out = []
+    for raw in tx_ids:
+        if not raw:
+            continue
+        s = str(raw)
+        out.append(s[:_TX_ID_PREFIX_LEN] + ('…' if len(s) > _TX_ID_PREFIX_LEN else ''))
+    return tuple(out)
+
 
 def _client_ip_bucket_key(request: web.Request) -> int:
     """Stable int bucket key from client IP for rate-limit storage.
@@ -297,7 +316,8 @@ async def platega_callback(request: web.Request) -> web.Response:
         logger.warning('Platega callback rejected: payload too large')
         return web.Response(status=413, text='payload too large')
     except web.HTTPException as exc:
-        logger.warning('Platega callback rejected: %s payload=%s', exc.text, payload)
+        logger.warning('Platega callback rejected: %s', exc.text)
+        logger.debug('Platega callback rejected payload=%s', payload)
         return web.Response(status=exc.status, text=exc.text)
 
     processed_result = None
@@ -318,19 +338,19 @@ async def platega_callback(request: web.Request) -> web.Response:
 
             if processed_result is None:
                 logger.warning(
-                    'Platega callback for unknown transaction ids=%s raw_status=%s normalized=%s payload=%s',
-                    envelope.candidate_external_ids,
+                    'Platega callback for unknown transaction ids=%s raw_status=%s normalized=%s',
+                    _sanitize_tx_ids(envelope.candidate_external_ids),
                     envelope.raw_status,
                     envelope.normalized_status,
-                    envelope.payload,
                 )
+                logger.debug('Platega callback unknown payload=%s', envelope.payload)
                 await session.rollback()
                 return web.Response(status=200)
 
             logger.info(
                 'Platega callback processed ids=%s resolved_external_id=%s raw_status=%s normalized=%s result=%s',
-                envelope.candidate_external_ids,
-                resolved_external_id,
+                _sanitize_tx_ids(envelope.candidate_external_ids),
+                _sanitize_tx_ids((resolved_external_id,))[0] if resolved_external_id else None,
                 envelope.raw_status,
                 envelope.normalized_status,
                 getattr(processed_result, 'status_text', None),
@@ -338,7 +358,7 @@ async def platega_callback(request: web.Request) -> web.Response:
     except Exception:
         logger.exception(
             'Failed to process Platega callback ids=%s raw_status=%s normalized=%s',
-            envelope.candidate_external_ids,
+            _sanitize_tx_ids(envelope.candidate_external_ids),
             envelope.raw_status,
             envelope.normalized_status,
         )
