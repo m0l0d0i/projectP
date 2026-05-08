@@ -5,104 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Веб-админка{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .help-dot {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 1.1rem;
-      height: 1.1rem;
-      border-radius: 9999px;
-      border: 1px solid rgba(148, 163, 184, 0.35);
-      background: rgba(15, 23, 42, 0.75);
-      color: rgb(125 211 252);
-      font-size: 0.72rem;
-      font-weight: 700;
-      cursor: help;
-      vertical-align: middle;
-      line-height: 1;
-    }
-
-    .help-inline {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      white-space: nowrap;
-    }
-
-    [data-tooltip] {
-      position: relative;
-    }
-
-    [data-tooltip]::after {
-      content: attr(data-tooltip);
-      position: absolute;
-      left: 0;
-      bottom: calc(100% + 0.55rem);
-      min-width: 13rem;
-      max-width: 22rem;
-      padding: 0.7rem 0.85rem;
-      border-radius: 0.9rem;
-      border: 1px solid rgba(51, 65, 85, 0.95);
-      background: rgba(2, 6, 23, 0.96);
-      color: rgb(226 232 240);
-      font-size: 0.78rem;
-      font-weight: 500;
-      line-height: 1.35;
-      white-space: normal;
-      opacity: 0;
-      transform: translateY(4px);
-      pointer-events: none;
-      transition: opacity 0.16s ease, transform 0.16s ease;
-      z-index: 50;
-      box-shadow: 0 12px 24px rgba(2, 6, 23, 0.28);
-    }
-
-    [data-tooltip]:hover::after,
-    [data-tooltip]:focus-visible::after {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  </style>
-
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const cookieName = '{{ csrf_cookie_name }}';
-      const readCookie = (name) => {
-        const prefix = `${name}=`;
-        return document.cookie
-          .split(';')
-          .map((chunk) => chunk.trim())
-          .find((chunk) => chunk.startsWith(prefix))
-          ?.slice(prefix.length) || '';
-      };
-
-      const token = readCookie(cookieName);
-      if (token) {
-        for (const form of document.querySelectorAll('form[method="post"], form[method="POST"]')) {
-          if (form.querySelector('input[name="csrf_token"]')) {
-            continue;
-          }
-          const input = document.createElement('input');
-          input.type = 'hidden';
-          input.name = 'csrf_token';
-          input.value = token;
-          form.appendChild(input);
-        }
-      }
-
-      for (const el of document.querySelectorAll('[data-tooltip]')) {
-        if (!el.hasAttribute('tabindex')) {
-          el.setAttribute('tabindex', '0');
-        }
-        if (!el.hasAttribute('aria-label')) {
-          el.setAttribute('aria-label', el.getAttribute('data-tooltip'));
-        }
-      }
-    });
-  </script>
+  <link rel="stylesheet" href="/static/admin.css">
+  <script src="/static/admin.js" defer></script>
 </head>
-<body class="min-h-screen bg-slate-950 text-slate-100">
+<body class="min-h-screen bg-slate-950 text-slate-100" data-csrf-cookie-name="{{ csrf_cookie_name }}">
   {% set page_titles = {
     'search': 'Поиск',
     'system': 'Система',

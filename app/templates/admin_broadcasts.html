@@ -506,7 +506,7 @@
                   Редактировать
                 </a>
 
-                <form method="post" action="/admin/broadcasts/" onsubmit="return confirm('Удалить эту рассылку?');">
+                <form method="post" action="/admin/broadcasts/" data-confirm="Удалить эту рассылку?">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="job_id" value="{{ row.id }}">
                   <button
@@ -520,7 +520,7 @@
                 {% endif %}
 
                 {% if row.can_request_cancel %}
-                <form method="post" action="/admin/broadcasts/" onsubmit="return confirm('Запросить отмену этой рассылки?');">
+                <form method="post" action="/admin/broadcasts/" data-confirm="Запросить отмену этой рассылки?">
                   <input type="hidden" name="action" value="cancel">
                   <input type="hidden" name="job_id" value="{{ row.id }}">
                   <button
@@ -601,84 +601,5 @@
   </div>
 </div>
 
-<script>
-(function () {
-  const runAtInput = document.getElementById('broadcast-run-at');
-
-  function toDatetimeLocalValue(date) {
-    const pad = (n) => String(n).padStart(2, '0');
-    return [
-      date.getFullYear(),
-      '-',
-      pad(date.getMonth() + 1),
-      '-',
-      pad(date.getDate()),
-      'T',
-      pad(date.getHours()),
-      ':',
-      pad(date.getMinutes()),
-    ].join('');
-  }
-
-  function setMinutesFromNow(minutes) {
-    if (!runAtInput) return;
-    const now = new Date();
-    now.setSeconds(0, 0);
-    now.setMinutes(now.getMinutes() + minutes);
-    runAtInput.value = toDatetimeLocalValue(now);
-  }
-
-  function setTomorrowAt(hour) {
-    if (!runAtInput) return;
-    const dt = new Date();
-    dt.setDate(dt.getDate() + 1);
-    dt.setHours(hour, 0, 0, 0);
-    runAtInput.value = toDatetimeLocalValue(dt);
-  }
-
-  document.querySelectorAll('.broadcast-quick-fill').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const minutes = parseInt(btn.dataset.offsetMinutes || '0', 10);
-      if (!Number.isNaN(minutes) && minutes > 0) {
-        setMinutesFromNow(minutes);
-      }
-    });
-  });
-
-  document.querySelectorAll('.broadcast-tomorrow-fill').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const hour = parseInt(btn.dataset.tomorrowHour || '10', 10);
-      if (!Number.isNaN(hour)) {
-        setTomorrowAt(hour);
-      }
-    });
-  });
-
-  const clearBtn = document.getElementById('broadcast-clear-run-at');
-  if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-      if (runAtInput) runAtInput.value = '';
-    });
-  }
-
-  const keyboardField = document.querySelector('textarea[name="keyboard_json"]');
-  const fillKeyboardBtn = document.getElementById('broadcast-fill-keyboard-sample');
-  const clearKeyboardBtn = document.getElementById('broadcast-clear-keyboard');
-
-  if (fillKeyboardBtn && keyboardField) {
-    fillKeyboardBtn.addEventListener('click', () => {
-      keyboardField.value = JSON.stringify([
-        [{ text: 'Открыть сайт', url: 'https://example.com' }],
-        [{ text: 'Поддержка', callback_data: 'support:open' }],
-      ], null, 2);
-    });
-  }
-
-  if (clearKeyboardBtn && keyboardField) {
-    clearKeyboardBtn.addEventListener('click', () => {
-      keyboardField.value = '';
-    });
-  }
-})();
-</script>
+<script src="/static/admin_broadcasts.js" defer></script>
 {% endblock %}

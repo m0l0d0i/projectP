@@ -26,14 +26,19 @@ _ADMIN_CSRF_COOKIE = 'web_admin_csrf'
 _ADMIN_MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 # CSP for admin pages.
-# 'unsafe-inline' для style/script оставлен временно — текущие admin_*.html
-# содержат inline-style и inline-script. После переноса invoice-страницы и
-# чистки inline-блоков эти токены нужно убрать (full SEC-H4 follow-up).
+# script-src: 'unsafe-inline' убран; все JS вынесен в /static/admin.js +
+# /static/admin_broadcasts.js (no inline event handlers — для confirm-диалогов
+# используются data-confirm + delegated listener в admin.js). Tailwind CDN
+# в whitelist.
+# style-src: 'unsafe-inline' остаётся, потому что Tailwind Play CDN инжектит
+# сгенерированный CSS в <style> в runtime; а ещё в шаблонах и f-string'ах
+# routes.py много inline style="..." attribute'ов. Полное removal требует
+# build-step Tailwind в статический CSS — отдельная задача.
 _ADMIN_CSP = (
     "default-src 'self'; "
     "img-src 'self' data:; "
     "style-src 'self' 'unsafe-inline'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "script-src 'self' https://cdn.tailwindcss.com; "
     "font-src 'self'; "
     "form-action 'self'; "
     "frame-ancestors 'none'; "

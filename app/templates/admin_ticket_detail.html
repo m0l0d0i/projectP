@@ -435,7 +435,7 @@
           Закрытие выполняется через единую business-логику: статус станет <span class="font-semibold text-rose-300">closed</span>, а причина сохранится только для админского аудита.
         </p>
 
-        <form method="post" action="/admin/tickets/{{ ticket.id }}/close" class="mt-5 space-y-4" onsubmit="return confirm('Закрыть тикет #{{ ticket.id }}?');">
+        <form method="post" action="/admin/tickets/{{ ticket.id }}/close" class="mt-5 space-y-4" data-confirm="Закрыть тикет #{{ ticket.id }}?">
           <div>
             <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
               <span>Причина закрытия (только для админа)</span>

@@ -557,7 +557,7 @@
                 </a>
 
                 {% if tariff.status != 'archived' %}
-                <form method="post" action="/admin/pricing/" onsubmit="return confirm('Архивировать тариф {{ tariff.title }} ({{ tariff.code }})?');">
+                <form method="post" action="/admin/pricing/" data-confirm="Архивировать тариф {{ tariff.title }} ({{ tariff.code }})?">
                   <input type="hidden" name="action" value="archive_tariff">
                   <input type="hidden" name="tariff_code" value="{{ tariff.code }}">
                   <button type="submit" class="inline-flex rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20" title="Перевести тариф в архив без потери истории использования">
@@ -567,7 +567,7 @@
                 {% endif %}
 
                 {% if tariff.usage_count in [0, None] and tariff.status != 'archived' %}
-                <form method="post" action="/admin/pricing/" onsubmit="return confirm('Удалить тариф {{ tariff.title }} ({{ tariff.code }})? Это действие необратимо.');">
+                <form method="post" action="/admin/pricing/" data-confirm="Удалить тариф {{ tariff.title }} ({{ tariff.code }})? Это действие необратимо.">
                   <input type="hidden" name="action" value="delete_tariff">
                   <input type="hidden" name="tariff_code" value="{{ tariff.code }}">
                   <button type="submit" class="inline-flex rounded-xl bg-rose-500 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-400" title="Полностью удалить неиспользованный тариф">
@@ -614,7 +614,7 @@
                 <a href="/admin/pricing/?status=archived&edit_code={{ tariff.code }}" class="inline-flex rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Открыть карточку архивного тарифа">
                   Открыть карточку
                 </a>
-                <form method="post" action="/admin/pricing/" onsubmit="return confirm('Вернуть тариф {{ tariff.title }} ({{ tariff.code }}) из архива?');">
+                <form method="post" action="/admin/pricing/" data-confirm="Вернуть тариф {{ tariff.title }} ({{ tariff.code }}) из архива?">
                   <input type="hidden" name="action" value="reactivate_tariff">
                   <input type="hidden" name="tariff_code" value="{{ tariff.code }}">
                   <button type="submit" class="inline-flex rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20" title="Вернуть архивный тариф в рабочий список">

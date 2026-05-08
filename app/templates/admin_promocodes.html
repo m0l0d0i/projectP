@@ -428,7 +428,7 @@
                 {% endif %}
 
                 {% if row.can_delete %}
-                <form method="post" action="/admin/promocodes/" class="inline-flex" onsubmit="return confirm('Удалить промокод {{ row.code }}? Это действие нельзя отменить.');">
+                <form method="post" action="/admin/promocodes/" class="inline-flex" data-confirm="Удалить промокод {{ row.code }}? Это действие нельзя отменить.">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="promo_id" value="{{ row.id }}">
                   <button

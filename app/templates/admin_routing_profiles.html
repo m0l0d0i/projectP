@@ -552,7 +552,7 @@
                         </button>
                       </form>
 
-                      <form method="post" action="/admin/routing-profiles/" onsubmit="return confirm('Удалить профиль маршрутизации {{ code }}?');">
+                      <form method="post" action="/admin/routing-profiles/" data-confirm="Удалить профиль маршрутизации {{ code }}?">
                         <input type="hidden" name="action" value="delete" />
                         <input type="hidden" name="profile_id" value="{{ profile_id }}" />
                         <button type="submit" title="Удалить профиль маршрутизации. Удаление default-профиля блокируется на уровне backend-логики." class="inline-flex items-center justify-center rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/20">
