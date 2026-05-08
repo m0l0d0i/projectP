@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import hashlib
 import logging
 import os
@@ -451,8 +452,10 @@ class GeodataUpdater:
         return backup_path
 
     def _prune_backups(self, path: Path) -> None:
+        # SEC-L6: escape literal name на случай, если в нём окажутся glob-метасимволы
+        # (`*`, `?`, `[`) — иначе сюда могли бы попасть посторонние файлы.
         backups = sorted(
-            path.parent.glob(f'{path.name}.*.bak'),
+            path.parent.glob(f'{glob.escape(path.name)}.*.bak'),
             key=lambda item: item.stat().st_mtime,
             reverse=True,
         )

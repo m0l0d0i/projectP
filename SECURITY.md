@@ -55,5 +55,5 @@
 - [x] **SEC-L3.** Удалить мёртвый импорт `import subprocess` в `app/web/routes.py:16`. Закрыто 2026-05-07: top-level `subprocess` использовался только через `asyncio.subprocess.PIPE` (а тот доступен через сам `asyncio`-пакет).
 - [ ] **SEC-L4.** Без CSP / `X-Frame-Options` / `X-Content-Type-Options` на admin-страницах.
 - [ ] **SEC-L5.** `audit.log` хранит 30 дней админских действий с деталями инвойсов — убедиться в шифровании диска.
-- [ ] **SEC-L6.** `_prune_backups` использует glob по `path.name` — сегодня безопасно (timestamp suffix), но при добавлении путей вручную проверять отсутствие `*`.
+- [x] **SEC-L6.** `_prune_backups` использует glob по `path.name`. Закрыто 2026-05-09: добавлен `glob.escape(path.name)` в `app/services/geodata_updater.py:_prune_backups` — defence-in-depth даже если конфиг геодаты позже расширят произвольными путями.
 - [ ] **SEC-L7.** `marzban_env_manager` корректно использует allowlist + readonly + atomic write — оставлено как образец, но проверить, что admin не имеет UI-расширения allowlist (model validator уже запрещает overlap).
