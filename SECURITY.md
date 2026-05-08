@@ -50,7 +50,7 @@
 
 ## LOW / INFO (P3)
 
-- [ ] **SEC-L1.** Удалить `curl` из runtime-образа (используется только в healthcheck) — заменить на python-based check (`Dockerfile:26`).
+- [x] **SEC-L1.** Удалить `curl` из runtime-образа (используется только в healthcheck) — заменить на python-based check (`Dockerfile:26`). Закрыто 2026-05-09: `curl` удалён из `Dockerfile`, healthcheck в `docker-compose.yml` переписан на `python -c "urllib.request.urlopen(/readyz)"`.
 - [ ] **SEC-L2.** Нет lockfile (`requirements.txt` `>=` only) — supply-chain risk. Перейти на `pip-tools` / `uv pip compile` (см. также QC-9.1 в [CODE_QUALITY.md](CODE_QUALITY.md)).
 - [x] **SEC-L3.** Удалить мёртвый импорт `import subprocess` в `app/web/routes.py:16`. Закрыто 2026-05-07: top-level `subprocess` использовался только через `asyncio.subprocess.PIPE` (а тот доступен через сам `asyncio`-пакет).
 - [ ] **SEC-L4.** Без CSP / `X-Frame-Options` / `X-Content-Type-Options` на admin-страницах.

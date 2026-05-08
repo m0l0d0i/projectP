@@ -93,7 +93,7 @@ services:
     command: >
       sh -ec "alembic upgrade head && exec python -m app.main"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${APP_PORT:-8080}/readyz >/dev/null || exit 1"]
+      test: ["CMD", "python", "-c", "import os,sys,urllib.request as u; r=u.urlopen(f'http://127.0.0.1:{os.environ.get(\"APP_PORT\",\"8080\")}/readyz', timeout=4); sys.exit(0 if 200<=r.status<300 else 1)"]
       interval: 15s
       timeout: 5s
       retries: 12
