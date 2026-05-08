@@ -2955,16 +2955,30 @@ class OutboxRepository:
         text: str,
         parse_mode: str | None = None,
         disable_web_page_preview: bool | None = None,
+        reply_markup=None,
+        user_id: int | None = None,
         correlation_key: str | None = None,
         max_attempts: int | None = None,
     ) -> OutboxMessage | None:
         """Enqueue a Telegram text message. Returns the row, or None on
-        correlation_key conflict (treated as already-enqueued duplicate)."""
+        correlation_key conflict (treated as already-enqueued duplicate).
+
+        `reply_markup` — aiogram InlineKeyboardMarkup; сериализуется в payload
+        через `model_dump(exclude_none=True)` и восстанавливается воркером.
+        `user_id` — для propagation `bot_blocked` при TelegramForbiddenError
+        и сброса флага после успешной доставки."""
         payload: dict = {'text': text}
         if parse_mode is not None:
             payload['parse_mode'] = parse_mode
         if disable_web_page_preview is not None:
             payload['disable_web_page_preview'] = bool(disable_web_page_preview)
+        if reply_markup is not None:
+            try:
+                payload['reply_markup'] = reply_markup.model_dump(exclude_none=True)
+            except AttributeError:
+                payload['reply_markup'] = dict(reply_markup) if isinstance(reply_markup, dict) else reply_markup
+        if user_id is not None:
+            payload['user_id'] = int(user_id)
 
         row = OutboxMessage(
             kind=OutboxKind.tg_message,

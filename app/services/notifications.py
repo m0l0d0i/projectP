@@ -12,6 +12,7 @@ from app.db.models import AuditAction, AuditActorType, SupportTicketStatus
 from app.db.repositories import (
     AppSettingsRepository,
     AuditLogRepository,
+    OutboxRepository,
     SubscriptionRepository,
     SupportTicketRepository,
     UserRepository,
@@ -142,62 +143,43 @@ async def check_expiring(bot, sessionmaker: async_sessionmaker, settings: Settin
             logger.error('Failed to sync subscription for expiry notification', exc_info=exc)
             continue
 
-        expire_at = remote.expire_datetime
-        notify_text = None
-        mark_3d = False
-        mark_1d = False
-        mark_expired = False
-        set_inactive = False
-
-        async with sessionmaker() as session:
-            subscriptions = SubscriptionRepository(session)
-            subscription = await subscriptions.get_by_id_for_update(target.subscription_id)
-            if not subscription:
-                continue
-
-            _sync_local_from_remote(subscription, remote, settings)
-
-            if expire_at is None:
-                await session.commit()
-                continue
-
-            time_left = expire_at - now
-            if time_left.total_seconds() <= 0:
-                if not subscription.notified_expired:
-                    notify_text = '❌ Ваша подписка истекла. Доступ к VPN приостановлен.\nПожалуйста, продлите тариф.'
-                    mark_expired = True
-                set_inactive = True
-            elif timedelta(days=2) < time_left <= timedelta(days=3) and not subscription.notified_3d:
-                notify_text = '⚠️ Ваша подписка истекает через 3 дня!'
-                mark_3d = True
-            elif timedelta(days=0) < time_left <= timedelta(days=1) and not subscription.notified_1d:
-                notify_text = '🔥 Ваша подписка истекает уже завтра!'
-                mark_1d = True
-
-            await session.commit()
-
-        if notify_text and not await _safe_send(
-            bot,
-            target.user_tg_id,
-            notify_text,
-            sessionmaker=sessionmaker,
-            user_id=target.user_id,
-        ):
-            continue
-
         async with sessionmaker.begin() as session:
             subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
             if not subscription:
                 continue
 
-            if mark_3d and not subscription.notified_3d:
-                subscription.notified_3d = True
-            if mark_1d and not subscription.notified_1d:
-                subscription.notified_1d = True
-            if mark_expired and not subscription.notified_expired:
-                subscription.notified_expired = True
-            if set_inactive:
+            _sync_local_from_remote(subscription, remote, settings)
+
+            expire_at = remote.expire_datetime
+            if expire_at is None:
+                continue
+
+            time_left = expire_at - now
+            notify_text: str | None = None
+            correlation_kind: str | None = None
+
+            if time_left.total_seconds() <= 0:
                 subscription.is_active = False
+                if not subscription.notified_expired:
+                    notify_text = '❌ Ваша подписка истекла. Доступ к VPN приостановлен.\nПожалуйста, продлите тариф.'
+                    correlation_kind = 'expired'
+                    subscription.notified_expired = True
+            elif timedelta(days=2) < time_left <= timedelta(days=3) and not subscription.notified_3d:
+                notify_text = '⚠️ Ваша подписка истекает через 3 дня!'
+                correlation_kind = 'expiry_3d'
+                subscription.notified_3d = True
+            elif timedelta(days=0) < time_left <= timedelta(days=1) and not subscription.notified_1d:
+                notify_text = '🔥 Ваша подписка истекает уже завтра!'
+                correlation_kind = 'expiry_1d'
+                subscription.notified_1d = True
+
+            if notify_text and correlation_kind:
+                await OutboxRepository(session).enqueue_tg_message(
+                    chat_id=target.user_tg_id,
+                    text=notify_text,
+                    user_id=target.user_id,
+                    correlation_key=f'subscription:{target.subscription_id}:{correlation_kind}',
+                )
 
 
 async def check_low_traffic(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
@@ -210,50 +192,30 @@ async def check_low_traffic(bot, sessionmaker: async_sessionmaker, settings: Set
             logger.error('Failed to sync subscription for traffic notification', exc_info=exc)
             continue
 
-        if remote.data_limit in (None, 0):
-            async with sessionmaker.begin() as session:
-                subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
-                if subscription:
-                    _sync_local_from_remote(subscription, remote, settings)
-            continue
-
-        if remote.expire_datetime is not None and remote.expire_datetime <= now:
-            async with sessionmaker.begin() as session:
-                subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
-                if subscription:
-                    _sync_local_from_remote(subscription, remote, settings)
-            continue
-
-        ratio = (remote.used_traffic / remote.data_limit) if remote.data_limit > 0 else 0
-        should_notify = False
-
-        async with sessionmaker() as session:
+        async with sessionmaker.begin() as session:
             subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
             if not subscription:
                 continue
 
             _sync_local_from_remote(subscription, remote, settings)
-            should_notify = 0.9 <= ratio < 0.99 and not subscription.notified_low_traffic
-            await session.commit()
 
-        if not should_notify:
-            continue
+            if remote.data_limit in (None, 0):
+                continue
+            if remote.expire_datetime is not None and remote.expire_datetime <= now:
+                continue
 
-        sent = await _safe_send(
-            bot,
-            target.user_tg_id,
-            '⚠️ Осталось меньше 10% трафика. Вы можете докупить трафик или продлить тариф досрочно.',
-            sessionmaker=sessionmaker,
-            user_id=target.user_id,
-            reply_markup=low_traffic_alert_keyboard(target.subscription_id),
-        )
-        if not sent:
-            continue
+            ratio = (remote.used_traffic / remote.data_limit) if remote.data_limit > 0 else 0
+            if not (0.9 <= ratio < 0.99 and not subscription.notified_low_traffic):
+                continue
 
-        async with sessionmaker.begin() as session:
-            subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
-            if subscription and not subscription.notified_low_traffic:
-                subscription.notified_low_traffic = True
+            subscription.notified_low_traffic = True
+            await OutboxRepository(session).enqueue_tg_message(
+                chat_id=target.user_tg_id,
+                text='⚠️ Осталось меньше 10% трафика. Вы можете докупить трафик или продлить тариф досрочно.',
+                reply_markup=low_traffic_alert_keyboard(target.subscription_id),
+                user_id=target.user_id,
+                correlation_key=f'subscription:{target.subscription_id}:low_traffic',
+            )
 
 
 async def check_traffic_exhaustion(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
@@ -266,50 +228,30 @@ async def check_traffic_exhaustion(bot, sessionmaker: async_sessionmaker, settin
             logger.error('Failed to sync subscription for traffic exhaustion notification', exc_info=exc)
             continue
 
-        if remote.data_limit in (None, 0):
-            async with sessionmaker.begin() as session:
-                subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
-                if subscription:
-                    _sync_local_from_remote(subscription, remote, settings)
-            continue
-
-        if remote.expire_datetime is not None and remote.expire_datetime <= now:
-            async with sessionmaker.begin() as session:
-                subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
-                if subscription:
-                    _sync_local_from_remote(subscription, remote, settings)
-            continue
-
-        should_notify = remote.used_traffic >= int(remote.data_limit * 0.99)
-
-        async with sessionmaker() as session:
+        async with sessionmaker.begin() as session:
             subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
             if not subscription:
                 continue
 
             _sync_local_from_remote(subscription, remote, settings)
-            should_notify = should_notify and not subscription.notified_exhausted
-            await session.commit()
 
-        if not should_notify:
-            continue
+            if remote.data_limit in (None, 0):
+                continue
+            if remote.expire_datetime is not None and remote.expire_datetime <= now:
+                continue
 
-        sent = await _safe_send(
-            bot,
-            target.user_tg_id,
-            '📉 <b>Ваш трафик почти исчерпан!</b>\nVPN скоро перестанет работать. Вы можете докупить трафик или досрочно продлить тариф.',
-            sessionmaker=sessionmaker,
-            user_id=target.user_id,
-            reply_markup=low_traffic_alert_keyboard(target.subscription_id),
-            parse_mode='HTML',
-        )
-        if not sent:
-            continue
+            if not (remote.used_traffic >= int(remote.data_limit * 0.99) and not subscription.notified_exhausted):
+                continue
 
-        async with sessionmaker.begin() as session:
-            subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
-            if subscription and not subscription.notified_exhausted:
-                subscription.notified_exhausted = True
+            subscription.notified_exhausted = True
+            await OutboxRepository(session).enqueue_tg_message(
+                chat_id=target.user_tg_id,
+                text='📉 <b>Ваш трафик почти исчерпан!</b>\nVPN скоро перестанет работать. Вы можете докупить трафик или досрочно продлить тариф.',
+                parse_mode='HTML',
+                reply_markup=low_traffic_alert_keyboard(target.subscription_id),
+                user_id=target.user_id,
+                correlation_key=f'subscription:{target.subscription_id}:traffic_exhausted',
+            )
 
 
 async def check_monthly_traffic_reset(bot, sessionmaker: async_sessionmaker, settings: Settings, marzban: MarzbanClient) -> None:
