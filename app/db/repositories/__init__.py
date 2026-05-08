@@ -2146,6 +2146,7 @@ class SupportTicketRepository:
 
         stmt = (
             select(SupportTicket)
+            .options(selectinload(SupportTicket.user))
             .outerjoin(last_message_subq, last_message_subq.c.ticket_id == SupportTicket.id)
             .where(
                 SupportTicket.status.in_(self.ACTIVE_STATUSES),

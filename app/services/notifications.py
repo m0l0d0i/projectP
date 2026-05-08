@@ -365,7 +365,6 @@ async def check_support_ticket_auto_close(bot, sessionmaker: async_sessionmaker,
     while True:
         async with sessionmaker() as session:
             ticket_repo = SupportTicketRepository(session)
-            user_repo = UserRepository(session)
 
             tickets_to_close = await ticket_repo.due_auto_close(
                 threshold,
@@ -375,7 +374,7 @@ async def check_support_ticket_auto_close(bot, sessionmaker: async_sessionmaker,
 
             ticket_payloads: list[tuple[int, int | None, int | None]] = []
             for ticket in tickets_to_close:
-                user = await user_repo.get_by_id(ticket.user_id)
+                user = ticket.user
                 ticket_payloads.append((ticket.id, user.id if user else None, user.tg_id if user else None))
 
         if not ticket_payloads:
