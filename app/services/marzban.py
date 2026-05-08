@@ -20,6 +20,7 @@ import httpx
 from dateutil.relativedelta import relativedelta
 
 from app.config import Settings
+from app.services.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from app.services.subscription_urls import canonicalize_subscription_url, normalize_public_subscription_origin
 from app.db.models import NodeHealthStatus, NodeSourceStatus, NodeSyncState
 from app.db.repositories.node_registry import NodeRegistryRepository
@@ -48,6 +49,16 @@ def _secret_to_str(value: Any) -> str | None:
         normalized = value.strip()
         return normalized or None
     return str(value).strip() or None
+
+
+def _marzban_breaker_is_failure(exc: BaseException) -> bool:
+    if isinstance(exc, UserAlreadyExistsError):
+        return False
+    if isinstance(exc, (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError)):
+        return True
+    if isinstance(exc, MarzbanAPIError):
+        return exc.status_code is None or exc.status_code >= 500
+    return False
 
 
 class MarzbanAPIError(RuntimeError):
@@ -188,6 +199,12 @@ class MarzbanClient:
         self._token: str | None = None
         self._token_expires_at: datetime | None = None
         self._token_lock = asyncio.Lock()
+        self._breaker = CircuitBreaker(
+            'marzban',
+            failure_threshold=int(getattr(settings, 'marzban_circuit_failure_threshold', 5)),
+            cooldown_seconds=float(getattr(settings, 'marzban_circuit_cooldown_seconds', 30.0)),
+            is_failure=_marzban_breaker_is_failure,
+        )
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -316,6 +333,15 @@ class MarzbanClient:
         if not self._enabled:
             raise MarzbanAPIError('Marzban не настроен')
 
+        try:
+            async with self._breaker:
+                return await self._do_request(method, path, auth=auth, **kwargs)
+        except CircuitBreakerOpenError as exc:
+            raise MarzbanAPIError(
+                f'Marzban временно недоступен (circuit breaker open, retry in {exc.retry_after:.1f}s)'
+            ) from exc
+
+    async def _do_request(self, method: str, path: str, *, auth: bool = True, **kwargs: Any) -> httpx.Response:
         retries = max(0, int(self.settings.marzban_request_retries))
         last_exc: Exception | None = None
         headers = dict(kwargs.pop('headers', {}) or {})

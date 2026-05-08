@@ -13,7 +13,17 @@ import aiohttp
 
 from app.config import Settings
 from app.observability.metrics import PAYMENT_REQUESTS
+from app.services.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from app.services.payments.base import PaymentInvoice, PaymentProvider, PaymentProviderError
+
+
+def _platega_breaker_is_failure(exc: BaseException) -> bool:
+    if isinstance(exc, (aiohttp.ClientConnectionError, asyncio.TimeoutError)):
+        return True
+    if isinstance(exc, PaymentProviderError):
+        msg = str(exc)
+        return 'HTTP 5' in msg or 'невалидный JSON' in msg
+    return False
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +134,12 @@ class PlategaProvider(PaymentProvider):
 
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
+        self._breaker = CircuitBreaker(
+            'platega',
+            failure_threshold=int(getattr(settings, 'platega_circuit_failure_threshold', 5)),
+            cooldown_seconds=float(getattr(settings, 'platega_circuit_cooldown_seconds', 30.0)),
+            is_failure=_platega_breaker_is_failure,
+        )
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is not None and not self._session.closed:
@@ -268,6 +284,22 @@ class PlategaProvider(PaymentProvider):
     ) -> dict[str, Any]:
         self._ensure_configured()
 
+        try:
+            async with self._breaker:
+                return await self._do_request(method, path, json_data=json_data)
+        except CircuitBreakerOpenError as exc:
+            PAYMENT_REQUESTS.labels(provider='platega', result='circuit_open').inc()
+            raise PaymentProviderError(
+                f'Платежный сервис временно недоступен (circuit breaker, retry in {exc.retry_after:.1f}s)'
+            ) from exc
+
+    async def _do_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         normalized_path = path if path.startswith('/') else f'/{path}'
         url = f'{self.base_url}{normalized_path}'
         max_attempts = 1 + len(_REQUEST_BACKOFF_SECONDS)
