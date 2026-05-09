@@ -1303,21 +1303,25 @@ class SubscriptionRepository:
         return list(res.all())
 
     async def trial_pending_milestones(
-        self, *, since: datetime
+        self, *, expire_after: datetime
     ) -> list[tuple[Subscription, User]]:
         """Триал-подписки, у которых хотя бы один из notified_trial_* флагов
         ещё не выставлен. Используется в job `check_trial_milestones`.
 
-        `since` ограничивает выборку (обычно `now - 7 дней`), чтобы скан не
-        разрастался. После выставления всех трёх флагов подписка выпадает
-        из выборки.
+        Фильтр идёт по `expire_date >= expire_after` (обычно `now -
+        max_post_expire_lag`), а не по `created_at` — это автоматически
+        работает для триалов любой длительности (1 день, неделя, месяц):
+        живой триал имеет `expire_date > now`, post_expire-окно покрывается
+        отрицательным запасом. Подписки, у которых post_expire-окно уже
+        прошло, выпадают из выборки и не сканируются впустую.
         """
         res = await self.session.execute(
             select(Subscription, User)
             .join(User, User.id == Subscription.user_id)
             .where(
                 Subscription.is_trial.is_(True),
-                Subscription.created_at >= since,
+                Subscription.expire_date.is_not(None),
+                Subscription.expire_date >= expire_after,
                 or_(
                     Subscription.notified_trial_mid.is_(False),
                     Subscription.notified_trial_last_day.is_(False),

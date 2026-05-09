@@ -147,9 +147,9 @@ _FALLBACK_WEEKLY_USAGE_TEMPLATE = (
     'Активна до: {expire_label}.'
 )
 
-# FEA-NOTIF: окно сканирования триалов (created_at >= now - this).
-_TRIAL_SCAN_WINDOW = timedelta(days=7)
-# FEA-NOTIF: пороги для milestone-нотификаций.
+# FEA-NOTIF: пороги для milestone-нотификаций (не зависят от длительности
+# триала — она задаётся в admin-UI и может быть любой: 1 день / неделя /
+# месяц).
 _TRIAL_MID_AFTER = timedelta(hours=12)
 _TRIAL_LAST_DAY_BEFORE = timedelta(hours=2)
 _TRIAL_POST_EXPIRE_AFTER = timedelta(hours=24)
@@ -333,10 +333,14 @@ async def check_trial_milestones(
     """
     dispatcher = dispatcher or NotificationDispatcher()
     now = datetime.now(timezone.utc)
-    since = now - _TRIAL_SCAN_WINDOW
+    # Окно — все триалы, у которых post_expire-сценарий ещё актуален (или
+    # триал ещё активен). Работает для любой длительности триала.
+    expire_after = now - _TRIAL_POST_EXPIRE_MAX_LAG
 
     async with sessionmaker() as session:
-        rows = await SubscriptionRepository(session).trial_pending_milestones(since=since)
+        rows = await SubscriptionRepository(session).trial_pending_milestones(
+            expire_after=expire_after,
+        )
         targets = [
             (sub.id, user.id, user.tg_id) for sub, user in rows
         ]
