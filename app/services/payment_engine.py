@@ -712,7 +712,9 @@ class PaymentService:
     async def create_topup_invoice(self, *, user: User, topup_code: str, subscription_id: int | None = None) -> Invoice:
         target_subscription = await self._validate_topup_target(user=user, subscription_id=subscription_id)
 
-        basket = PricingService.calculate_topup_basket(topup_code, user.balance, use_balance=False)
+        basket = await PricingService.calculate_topup_basket(
+            self.session, topup_code, user.balance, use_balance=False,
+        )
         payload = {
             'kind': 'topup',
             'description': f'Докупка трафика {basket.topup.title} до конца текущего цикла',

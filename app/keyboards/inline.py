@@ -5,8 +5,13 @@ from decimal import Decimal
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from typing import TYPE_CHECKING
+
 from app.db.models import BroadcastJobStatus, Invoice, SupportTicketStatus
 from app.services.tariffs import PricingService
+
+if TYPE_CHECKING:
+    from app.services.tariffs import TopUpOption  # noqa: F401
 
 
 class TrialCallback(CallbackData, prefix='trial'):
@@ -443,11 +448,32 @@ def invoice_cart_keyboard(invoice: Invoice, user_balance: Decimal | float | int 
     )
 
 
-def topup_keyboard(subscription_id: int) -> InlineKeyboardMarkup:
-    rows = []
-    for topup in PricingService.TOPUPS.values():
-        rows.append([InlineKeyboardButton(text=f'{topup.title} — {topup.amount} ₽', callback_data=TopUpCallback(code=topup.code, subscription_id=subscription_id).pack())])
-    rows.append([InlineKeyboardButton(text='⬅️ Назад', callback_data=VpnCallback(action='details', subscription_id=subscription_id).pack())])
+def topup_keyboard(
+    subscription_id: int,
+    topups: 'list[TopUpOption]',
+) -> InlineKeyboardMarkup:
+    """Меню «Докупить трафик» (FEA-A8).
+
+    `topups` — список из `PricingService.list_topups(session)`. Опция с
+    `is_best_price=True` либо собственным `badge_label` отображается
+    дополнительной пометкой в тексте кнопки.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    for topup in topups:
+        badge = topup.display_badge
+        text = f'{topup.title} — {topup.amount} ₽'
+        if badge:
+            text = f'{text}  {badge}'
+        rows.append([InlineKeyboardButton(
+            text=text,
+            callback_data=TopUpCallback(
+                code=topup.code, subscription_id=subscription_id,
+            ).pack(),
+        )])
+    rows.append([InlineKeyboardButton(
+        text='⬅️ Назад',
+        callback_data=VpnCallback(action='details', subscription_id=subscription_id).pack(),
+    )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

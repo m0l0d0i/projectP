@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from typing import TYPE_CHECKING, Any, Iterable
 
-from app.db.repositories import PricingRuleRepository, TariffRepository
+from app.db.repositories import (
+    PricingRuleRepository,
+    TariffRepository,
+    TrafficTopupOptionRepository,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,6 +93,26 @@ class TopUpOption:
     title: str
     extra_traffic_gb: int
     amount: Decimal
+    sort_order: int = 100
+    badge_label: str | None = None
+    is_best_price: bool = False
+
+    @property
+    def price_per_gb(self) -> Decimal:
+        if self.extra_traffic_gb <= 0:
+            return Decimal('0.00')
+        return (self.amount / Decimal(self.extra_traffic_gb)).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP,
+        )
+
+    @property
+    def display_badge(self) -> str | None:
+        """Кастомный badge_label из БД имеет приоритет над авто-«лучшая цена»."""
+        if self.badge_label:
+            return self.badge_label
+        if self.is_best_price:
+            return '⭐ Лучшая цена/ГБ'
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,11 +147,6 @@ class PricingService:
     MAX_CUSTOM_DEVICES = 5
     MIN_MONTHS = 1
     MAX_MONTHS = 12
-
-    TOPUPS: dict[str, TopUpOption] = {
-        'topup50': TopUpOption(code='topup50', title='+50 ГБ', extra_traffic_gb=50, amount=money('62')),
-        'topup100': TopUpOption(code='topup100', title='+100 ГБ', extra_traffic_gb=100, amount=money('125')),
-    }
 
     @classmethod
     async def get_rules(cls, session: AsyncSession | None = None) -> PricingRuleSnapshot:
@@ -696,11 +715,68 @@ class PricingService:
         return int(gb) * 1024 * 1024 * 1024
 
     @classmethod
-    def get_topup(cls, code: str) -> TopUpOption:
-        topup = cls.TOPUPS.get(code)
-        if not topup:
-            raise ValueError('Пакет трафика не найден')
-        return topup
+    async def list_topups(
+        cls, session: 'AsyncSession', *, only_enabled: bool = True,
+    ) -> list[TopUpOption]:
+        """Возвращает доступные пакеты докупки трафика из БД (FEA-A8).
+
+        `is_best_price` проставляется опции с минимальной ценой за ГБ среди
+        возвращённого набора (auto-бейдж «⭐ Лучшая цена/ГБ», если у опции
+        нет своего `badge_label`)."""
+        repo = TrafficTopupOptionRepository(session)
+        rows = await repo.list_enabled() if only_enabled else await repo.list_all()
+        if not rows:
+            return []
+
+        bare = [
+            TopUpOption(
+                code=row.code,
+                title=row.title,
+                extra_traffic_gb=int(row.extra_traffic_gb),
+                amount=money(row.amount),
+                sort_order=int(row.sort_order),
+                badge_label=row.badge_label,
+                is_best_price=False,
+            )
+            for row in rows
+        ]
+
+        # «Лучшая цена/ГБ» — только если есть хотя бы 2 опции и победитель
+        # уникален (иначе бейдж не помогает выбору).
+        if len(bare) >= 2:
+            ppg = [opt.price_per_gb for opt in bare]
+            min_ppg = min(ppg)
+            winners = [i for i, value in enumerate(ppg) if value == min_ppg]
+            if len(winners) == 1:
+                idx = winners[0]
+                bare[idx] = TopUpOption(
+                    code=bare[idx].code,
+                    title=bare[idx].title,
+                    extra_traffic_gb=bare[idx].extra_traffic_gb,
+                    amount=bare[idx].amount,
+                    sort_order=bare[idx].sort_order,
+                    badge_label=bare[idx].badge_label,
+                    is_best_price=True,
+                )
+        return bare
+
+    @classmethod
+    async def get_topup(cls, session: 'AsyncSession', code: str) -> TopUpOption:
+        repo = TrafficTopupOptionRepository(session)
+        row = await repo.get_by_code(code)
+        if row is None or not row.is_enabled:
+            raise ValueError('Пакет трафика не найден или отключён')
+        # Для одиночного резолва бейдж best-price не вычисляется — для этого
+        # вызывайте `list_topups()`.
+        return TopUpOption(
+            code=row.code,
+            title=row.title,
+            extra_traffic_gb=int(row.extra_traffic_gb),
+            amount=money(row.amount),
+            sort_order=int(row.sort_order),
+            badge_label=row.badge_label,
+            is_best_price=False,
+        )
 
     @classmethod
     async def min_topup_amount(cls, session: AsyncSession | None = None) -> Decimal:
@@ -708,8 +784,14 @@ class PricingService:
         return rules.min_topup_amount
 
     @classmethod
-    def calculate_topup_basket(cls, topup_code: str, user_balance: Decimal, use_balance: bool) -> TopUpBasket:
-        topup = cls.get_topup(topup_code)
+    async def calculate_topup_basket(
+        cls,
+        session: 'AsyncSession',
+        topup_code: str,
+        user_balance: Decimal,
+        use_balance: bool,
+    ) -> TopUpBasket:
+        topup = await cls.get_topup(session, topup_code)
         total = money(topup.amount)
         balance_used = money(min(user_balance, total) if use_balance else Decimal('0.00'))
         payable = money(total - balance_used)

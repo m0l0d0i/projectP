@@ -785,9 +785,18 @@ async def topup_menu(callback: CallbackQuery, callback_data: VpnCallback, sessio
         await safe_callback_answer(callback, 'Для безлимитного тарифа докупка трафика не требуется и недоступна', show_alert=True)
         return
 
+    topups = await PricingService.list_topups(session)
+    if not topups:
+        await safe_callback_answer(
+            callback,
+            'Сейчас нет доступных пакетов докупки трафика. Попробуйте позже.',
+            show_alert=True,
+        )
+        return
+
     await callback.message.answer(
         'Выберите объем доп. трафика:',
-        reply_markup=topup_keyboard(callback_data.subscription_id),
+        reply_markup=topup_keyboard(callback_data.subscription_id, topups),
     )
     await safe_callback_answer(callback)
 

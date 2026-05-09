@@ -27,6 +27,7 @@ from app.db.models import (
     InvoiceStatus,
     MarzbanPageSettings,
     NotificationRule,
+    TrafficTopupOption,
     OutboxKind,
     OutboxMessage,
     OutboxStatus,
@@ -3028,6 +3029,118 @@ class NotificationRuleRepository:
             rule.description = _normalize_optional_str(description)
         await self.session.flush()
         return rule
+
+
+class TrafficTopupOptionRepository:
+    """Хранилище опций «докупки» трафика (FEA-A8).
+
+    Используется `PricingService` для резолва доступных пакетов и admin-UI
+    для CRUD. Сортировка — по `sort_order ASC, id ASC`.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def list_all(self) -> list[TrafficTopupOption]:
+        res = await self.session.execute(
+            select(TrafficTopupOption).order_by(
+                TrafficTopupOption.sort_order.asc(),
+                TrafficTopupOption.id.asc(),
+            )
+        )
+        return list(res.scalars().all())
+
+    async def list_enabled(self) -> list[TrafficTopupOption]:
+        res = await self.session.execute(
+            select(TrafficTopupOption)
+            .where(TrafficTopupOption.is_enabled.is_(True))
+            .order_by(
+                TrafficTopupOption.sort_order.asc(),
+                TrafficTopupOption.id.asc(),
+            )
+        )
+        return list(res.scalars().all())
+
+    async def get_by_code(self, code: str) -> TrafficTopupOption | None:
+        res = await self.session.execute(
+            select(TrafficTopupOption).where(TrafficTopupOption.code == code)
+        )
+        return res.scalar_one_or_none()
+
+    async def get_by_id(self, option_id: int) -> TrafficTopupOption | None:
+        res = await self.session.execute(
+            select(TrafficTopupOption).where(TrafficTopupOption.id == option_id)
+        )
+        return res.scalar_one_or_none()
+
+    async def create(
+        self,
+        *,
+        code: str,
+        title: str,
+        extra_traffic_gb: int,
+        amount: Decimal | int | float | str,
+        is_enabled: bool = True,
+        sort_order: int = 100,
+        badge_label: str | None = None,
+    ) -> TrafficTopupOption:
+        if not code or not code.strip():
+            raise ValueError('code не может быть пустым')
+        if int(extra_traffic_gb) <= 0:
+            raise ValueError('extra_traffic_gb должен быть > 0')
+        amount_value = _money(amount)
+        if amount_value < 0:
+            raise ValueError('amount должен быть ≥ 0')
+        row = TrafficTopupOption(
+            code=code.strip(),
+            title=title.strip(),
+            extra_traffic_gb=int(extra_traffic_gb),
+            amount=amount_value,
+            is_enabled=bool(is_enabled),
+            sort_order=int(sort_order),
+            badge_label=_normalize_optional_str(badge_label),
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def update(
+        self,
+        option: TrafficTopupOption,
+        *,
+        title: str | None = None,
+        extra_traffic_gb: int | None = None,
+        amount: Decimal | int | float | str | None = None,
+        is_enabled: bool | None = None,
+        sort_order: int | None = None,
+        badge_label: str | None = None,
+    ) -> TrafficTopupOption:
+        if title is not None:
+            stripped = title.strip()
+            if not stripped:
+                raise ValueError('title не может быть пустым')
+            option.title = stripped
+        if extra_traffic_gb is not None:
+            if int(extra_traffic_gb) <= 0:
+                raise ValueError('extra_traffic_gb должен быть > 0')
+            option.extra_traffic_gb = int(extra_traffic_gb)
+        if amount is not None:
+            amount_value = _money(amount)
+            if amount_value < 0:
+                raise ValueError('amount должен быть ≥ 0')
+            option.amount = amount_value
+        if is_enabled is not None:
+            option.is_enabled = bool(is_enabled)
+        if sort_order is not None:
+            option.sort_order = int(sort_order)
+        if badge_label is not None:
+            option.badge_label = _normalize_optional_str(badge_label)
+        await self.session.flush()
+        return option
+
+    async def delete(self, option: TrafficTopupOption) -> None:
+        await self.session.delete(option)
+        await self.session.flush()
 
 
 class OutboxRepository:

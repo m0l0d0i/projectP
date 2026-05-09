@@ -1369,3 +1369,39 @@ class NotificationRule(TimestampMixin, Base):
         Integer, nullable=False, default=100, server_default=sa_text('100')
     )
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class TrafficTopupOption(TimestampMixin, Base):
+    """Конфигурируемая опция «докупки» трафика (FEA-A8).
+
+    Заменяет хардкод `PricingService.TOPUPS`. Список редактируется через
+    web-admin (`/admin/upsells/traffic/`); коды `topup50`/`topup100` сохранены
+    в seed для обратной совместимости с smart-push клавиатурами FEA-NOTIF.
+    """
+
+    __tablename__ = 'traffic_topup_options'
+    __table_args__ = (
+        CheckConstraint(
+            'extra_traffic_gb > 0',
+            name='ck_traffic_topup_options_extra_positive',
+        ),
+        CheckConstraint(
+            'amount >= 0',
+            name='ck_traffic_topup_options_amount_non_negative',
+        ),
+        UniqueConstraint('code', name='uq_traffic_topup_options_code'),
+        Index('ix_traffic_topup_options_enabled_sort', 'is_enabled', 'sort_order'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(64), nullable=False)
+    extra_traffic_gb: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa_text('true')
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, server_default=sa_text('100')
+    )
+    badge_label: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -1091,7 +1091,7 @@ class SubscriptionService:
 
         payload = dict(invoice.payload_json or {})
         topup_code = payload['topup_code']
-        topup = PricingService.get_topup(topup_code)
+        topup = await PricingService.get_topup(self.session, topup_code)
         extra_traffic_bytes = PricingService.gb_to_bytes(int(topup.extra_traffic_gb))
 
         cycle_start_at, cycle_end_at = self._derive_cycle_bounds(subscription, now=self._now_utc())
