@@ -17,6 +17,7 @@ from app.db.repositories import AppLinkRepository, AppSettingsRepository, Subscr
 from app.handlers.common import get_or_create_user
 from app.keyboards.inline import (
     DeviceInfoCallback,
+    NotificationCallback,
     TrialCallback,
     VpnCallback,
     active_vpn_keyboard,
@@ -30,6 +31,8 @@ from app.keyboards.inline import (
     vpn_details_keyboard,
     vpn_services_keyboard,
 )
+from app.services.cache import CacheService
+from app.services.notification_dispatcher import NotificationDispatcher
 from app.keyboards.reply import main_menu
 from app.services.marzban import MarzbanAPIError, MarzbanClient
 from app.services.subscriptions import ResetTrafficQuote, SubscriptionService
@@ -866,3 +869,39 @@ async def back_main(callback: CallbackQuery, session: AsyncSession, settings: Se
     user = await get_or_create_user(callback, session)
     await _services_screen(callback.message, session=session, user_id=user.id)
     await safe_callback_answer(callback, 'Возвращаю к Мой VPN')
+
+
+_SNOOZE_TTL_SECONDS = 24 * 3600
+
+
+@router.callback_query(NotificationCallback.filter(F.action == 'snooze'))
+async def snooze_notification(
+    callback: CallbackQuery,
+    callback_data: NotificationCallback,
+    session: AsyncSession,
+    cache: CacheService,
+) -> None:
+    user = await get_or_create_user(callback, session)
+    code = (callback_data.code or '').strip()
+    if not code:
+        await safe_callback_answer(callback, 'Не удалось понять, какое уведомление отключить.', show_alert=True)
+        return
+
+    redis_client = getattr(cache, 'redis', None)
+    if redis_client is None:
+        await safe_callback_answer(callback, 'Snooze временно недоступен. Попробуйте позже.', show_alert=True)
+        return
+
+    key = NotificationDispatcher.snooze_key(
+        prefix=cache.prefix,
+        user_id=user.id,
+        code=code,
+    )
+    try:
+        await redis_client.set(key, '1', ex=_SNOOZE_TTL_SECONDS)
+    except Exception:
+        logger.exception('Failed to set snooze key for user_id=%s code=%s', user.id, code)
+        await safe_callback_answer(callback, 'Не удалось включить snooze. Попробуйте позже.', show_alert=True)
+        return
+
+    await safe_callback_answer(callback, '🔕 Не буду напоминать 24 часа.')

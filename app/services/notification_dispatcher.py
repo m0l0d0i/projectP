@@ -44,6 +44,7 @@ class NotificationDispatcher:
     """
 
     COOLDOWN_KEY_PREFIX = 'notif_cooldown'
+    SNOOZE_KEY_PREFIX = 'notif_snooze'
 
     def __init__(
         self,
@@ -53,6 +54,10 @@ class NotificationDispatcher:
     ) -> None:
         self._redis = redis_client
         self._redis_prefix = redis_prefix
+
+    @classmethod
+    def snooze_key(cls, *, prefix: str, user_id: int, code: str) -> str:
+        return f'{prefix}:{cls.SNOOZE_KEY_PREFIX}:{user_id}:{code}'
 
     async def dispatch(
         self,
@@ -76,6 +81,14 @@ class NotificationDispatcher:
         if rule is not None and not rule.is_enabled:
             logger.debug('Notification rule %s is disabled, skipping', code)
             NOTIFICATIONS_BLOCKED.labels(code=code, reason='disabled').inc()
+            return False
+
+        if self._redis is not None and await self._is_snoozed(user_id=user_id, code=code):
+            logger.debug(
+                'Notification snoozed for user_id=%s code=%s; skipping',
+                user_id, code,
+            )
+            NOTIFICATIONS_BLOCKED.labels(code=code, reason='snoozed').inc()
             return False
 
         ctx: dict[str, Any] = dict(context or {})
@@ -189,3 +202,15 @@ class NotificationDispatcher:
             # уведомления; повторные дубли отсекаются correlation_key outbox'а.
             logger.exception('Failed to acquire notification cooldown for code=%s', code)
             return True
+
+    async def _is_snoozed(self, *, user_id: int, code: str) -> bool:
+        """True — пользователь временно отключил уведомления этого кода."""
+        key = self.snooze_key(prefix=self._redis_prefix, user_id=user_id, code=code)
+        try:
+            result = await self._redis.exists(key)
+            return bool(result)
+        except Exception:
+            # Не блокируем доставку при ошибке Redis — лучше отправить, чем
+            # потерять важное уведомление.
+            logger.exception('Failed to check snooze key for code=%s user_id=%s', code, user_id)
+            return False

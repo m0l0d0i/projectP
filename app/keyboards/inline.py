@@ -57,6 +57,13 @@ class TopUpCallback(CallbackData, prefix='topup'):
     subscription_id: int = 0
 
 
+class NotificationCallback(CallbackData, prefix='notif'):
+    """FEA-NOTIF: действия из inline-кнопок smart-push (snooze и т.п.)."""
+
+    action: str  # 'snooze'
+    code: str = ''  # код правила, к которому относится действие
+
+
 class DeviceInfoCallback(CallbackData, prefix='device_info'):
     action: str
     subscription_id: int = 0
@@ -227,12 +234,35 @@ def low_traffic_alert_keyboard(
     *,
     allow_topup: bool = True,
     allow_early_renew: bool = True,
+    notification_code: str = '',
 ) -> InlineKeyboardMarkup:
+    """Клавиатура для smart-push о трафике (FEA-NOTIF).
+
+    `notification_code` — код правила, к которому привязан snooze (если
+    оставлен пустым, кнопка «Не напоминать 24ч» не отображается).
+    """
     rows: list[list[InlineKeyboardButton]] = []
     if allow_topup:
-        rows.append([InlineKeyboardButton(text='📦 Докупить трафик', callback_data=VpnCallback(action='topup', subscription_id=subscription_id).pack())])
+        rows.append([
+            InlineKeyboardButton(
+                text='➕ 50 ГБ',
+                callback_data=TopUpCallback(code='topup50', subscription_id=subscription_id).pack(),
+            ),
+            InlineKeyboardButton(
+                text='➕ 100 ГБ',
+                callback_data=TopUpCallback(code='topup100', subscription_id=subscription_id).pack(),
+            ),
+        ])
     if allow_early_renew:
-        rows.append([InlineKeyboardButton(text='⏳ Продлить тариф досрочно', callback_data=VpnCallback(action='renew_early', subscription_id=subscription_id).pack())])
+        rows.append([InlineKeyboardButton(
+            text='⏳ Продлить 1 мес',
+            callback_data=VpnCallback(action='renew_early', subscription_id=subscription_id).pack(),
+        )])
+    if notification_code:
+        rows.append([InlineKeyboardButton(
+            text='🔕 Не напоминать 24ч',
+            callback_data=NotificationCallback(action='snooze', code=notification_code).pack(),
+        )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -138,6 +138,23 @@ _FALLBACK_EXPIRING_1D = '🔥 Ваша подписка истекает уже 
 _FALLBACK_EXPIRED = '❌ Ваша подписка истекла. Доступ к VPN приостановлен.\nПожалуйста, продлите тариф.'
 _FALLBACK_LOW_TRAFFIC = '⚠️ Осталось меньше 10% трафика. Вы можете докупить трафик или продлить тариф досрочно.'
 _FALLBACK_EXHAUSTED = '📉 <b>Ваш трафик почти исчерпан!</b>\nVPN скоро перестанет работать. Вы можете докупить трафик или досрочно продлить тариф.'
+_FALLBACK_TRIAL_MID = '🎁 Половина пробного периода уже позади! Попробуйте оформить полноценный тариф.'
+_FALLBACK_TRIAL_LAST_DAY = '⏳ Триал заканчивается через 2 часа. Не теряйте доступ — оформите тариф.'
+_FALLBACK_TRIAL_POST_EXPIRE = '👋 Триал закончился вчера. Возвращайтесь — у нас есть специальное предложение для вас.'
+_FALLBACK_WEEKLY_USAGE_TEMPLATE = (
+    '📊 <b>Еженедельный отчёт по подписке {service_id}</b>\n'
+    'Использовано трафика: {used_gb} ГБ из {total_label}.\n'
+    'Активна до: {expire_label}.'
+)
+
+# FEA-NOTIF: окно сканирования триалов (created_at >= now - this).
+_TRIAL_SCAN_WINDOW = timedelta(days=7)
+# FEA-NOTIF: пороги для milestone-нотификаций.
+_TRIAL_MID_AFTER = timedelta(hours=12)
+_TRIAL_LAST_DAY_BEFORE = timedelta(hours=2)
+_TRIAL_POST_EXPIRE_AFTER = timedelta(hours=24)
+# Защита от слишком поздних post_expire (если job простаивал > 3д — не присылаем).
+_TRIAL_POST_EXPIRE_MAX_LAG = timedelta(days=3)
 
 
 async def check_expiring(
@@ -243,7 +260,10 @@ async def check_low_traffic(
                 chat_id=target.user_tg_id,
                 user_id=target.user_id,
                 default_text=_FALLBACK_LOW_TRAFFIC,
-                default_reply_markup=low_traffic_alert_keyboard(target.subscription_id),
+                default_reply_markup=low_traffic_alert_keyboard(
+                    target.subscription_id,
+                    notification_code='low_traffic_90',
+                ),
                 context={'subscription_id': target.subscription_id},
                 correlation_key=f'subscription:{target.subscription_id}:low_traffic',
             )
@@ -289,9 +309,171 @@ async def check_traffic_exhaustion(
                 user_id=target.user_id,
                 default_text=_FALLBACK_EXHAUSTED,
                 default_parse_mode='HTML',
-                default_reply_markup=low_traffic_alert_keyboard(target.subscription_id),
+                default_reply_markup=low_traffic_alert_keyboard(
+                    target.subscription_id,
+                    notification_code='traffic_exhausted',
+                ),
                 context={'subscription_id': target.subscription_id},
                 correlation_key=f'subscription:{target.subscription_id}:traffic_exhausted',
+            )
+
+
+async def check_trial_milestones(
+    bot,
+    sessionmaker: async_sessionmaker,
+    settings: Settings,
+    marzban: MarzbanClient,
+    dispatcher: NotificationDispatcher | None = None,
+) -> None:
+    """FEA-NOTIF: trial_mid / trial_last_day / trial_post_expire_rescue.
+
+    Идемпотентность через колонки `notified_trial_*` на Subscription —
+    Redis cooldown в правилах нужен только как дополнительная защита.
+    `created_at` подписки используется как момент старта триала.
+    """
+    dispatcher = dispatcher or NotificationDispatcher()
+    now = datetime.now(timezone.utc)
+    since = now - _TRIAL_SCAN_WINDOW
+
+    async with sessionmaker() as session:
+        rows = await SubscriptionRepository(session).trial_pending_milestones(since=since)
+        targets = [
+            (sub.id, user.id, user.tg_id) for sub, user in rows
+        ]
+
+    for subscription_id, user_id, user_tg_id in targets:
+        async with sessionmaker.begin() as session:
+            subscription = await SubscriptionRepository(session).get_by_id_for_update(subscription_id)
+            if not subscription or not subscription.is_trial:
+                continue
+
+            trial_started_at = subscription.created_at
+            trial_expire_at = subscription.expire_date
+            if trial_started_at is None or trial_expire_at is None:
+                continue
+
+            if trial_started_at.tzinfo is None:
+                trial_started_at = trial_started_at.replace(tzinfo=timezone.utc)
+            if trial_expire_at.tzinfo is None:
+                trial_expire_at = trial_expire_at.replace(tzinfo=timezone.utc)
+
+            triggered: list[tuple[str, str, str]] = []
+            # 1) trial_mid: через 12ч после старта, пока триал ещё активен.
+            if (
+                not subscription.notified_trial_mid
+                and now - trial_started_at >= _TRIAL_MID_AFTER
+                and now < trial_expire_at
+            ):
+                subscription.notified_trial_mid = True
+                triggered.append(('trial_mid', _FALLBACK_TRIAL_MID, 'trial_mid'))
+
+            # 2) trial_last_day: за 2ч до окончания, пока триал ещё активен.
+            if (
+                not subscription.notified_trial_last_day
+                and timedelta(0) < trial_expire_at - now <= _TRIAL_LAST_DAY_BEFORE
+            ):
+                subscription.notified_trial_last_day = True
+                triggered.append(('trial_last_day', _FALLBACK_TRIAL_LAST_DAY, 'trial_last_day'))
+
+            # 3) trial_post_expire_rescue: через 24ч после окончания (но не позже
+            # _TRIAL_POST_EXPIRE_MAX_LAG, чтобы не присылать неактуальное при
+            # затянувшемся простое job).
+            lag = now - trial_expire_at
+            if (
+                not subscription.notified_trial_post_expire
+                and lag >= _TRIAL_POST_EXPIRE_AFTER
+                and lag <= _TRIAL_POST_EXPIRE_MAX_LAG
+            ):
+                subscription.notified_trial_post_expire = True
+                triggered.append((
+                    'trial_post_expire_rescue',
+                    _FALLBACK_TRIAL_POST_EXPIRE,
+                    'trial_post_expire',
+                ))
+
+            for code, fallback_text, correlation_kind in triggered:
+                await dispatcher.dispatch(
+                    session=session,
+                    code=code,
+                    chat_id=user_tg_id,
+                    user_id=user_id,
+                    default_text=fallback_text,
+                    context={'subscription_id': subscription_id},
+                    correlation_key=f'subscription:{subscription_id}:{correlation_kind}',
+                )
+
+
+async def check_weekly_usage_report(
+    bot,
+    sessionmaker: async_sessionmaker,
+    settings: Settings,
+    marzban: MarzbanClient,
+    dispatcher: NotificationDispatcher | None = None,
+) -> None:
+    """FEA-NOTIF: weekly_usage_report.
+
+    Идемпотентность держится на cooldown_seconds правила (по умолчанию 6 дней
+    в seed). Job можно безопасно запускать ежедневно — повторные диспатчи
+    будут отсечены SET NX EX в Redis.
+    """
+    dispatcher = dispatcher or NotificationDispatcher()
+    now = datetime.now(timezone.utc)
+
+    for target in await _load_active_targets(sessionmaker):
+        try:
+            remote = await marzban.get_user(target.marzban_username)
+        except MarzbanAPIError as exc:
+            logger.error('Failed to sync subscription for weekly usage report', exc_info=exc)
+            continue
+
+        async with sessionmaker.begin() as session:
+            subscription = await SubscriptionRepository(session).get_by_id_for_update(target.subscription_id)
+            if not subscription:
+                continue
+
+            _sync_local_from_remote(subscription, remote, settings)
+
+            # Не отправляем отчёт по уже истёкшим/выключенным подпискам.
+            if remote.expire_datetime is not None and remote.expire_datetime <= now:
+                continue
+
+            data_limit = remote.data_limit
+            used_bytes = max(0, int(remote.used_traffic or 0))
+            used_gb = round(used_bytes / (1024 ** 3), 1)
+            if data_limit in (None, 0):
+                total_label = '♾️ безлимит'
+            else:
+                total_label = f'{round(int(data_limit) / (1024 ** 3), 1)} ГБ'
+
+            expire_label = (
+                remote.expire_datetime.strftime('%d.%m.%Y')
+                if remote.expire_datetime is not None else 'без срока'
+            )
+            fallback_text = _FALLBACK_WEEKLY_USAGE_TEMPLATE.format(
+                service_id=subscription.service_id,
+                used_gb=used_gb,
+                total_label=total_label,
+                expire_label=expire_label,
+            )
+
+            await dispatcher.dispatch(
+                session=session,
+                code='weekly_usage',
+                chat_id=target.user_tg_id,
+                user_id=target.user_id,
+                default_text=fallback_text,
+                default_parse_mode='HTML',
+                context={
+                    'subscription_id': target.subscription_id,
+                    'service_id': subscription.service_id,
+                    'used_gb': used_gb,
+                    'total_label': total_label,
+                    'expire_label': expire_label,
+                },
+                # correlation_key специально не задаём: dedup-окно держится
+                # cooldown'ом в Redis, а correlation_key привязал бы отчёт
+                # навсегда к первой неделе.
+                correlation_key=None,
             )
 
 

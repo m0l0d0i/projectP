@@ -1302,6 +1302,31 @@ class SubscriptionRepository:
         )
         return list(res.all())
 
+    async def trial_pending_milestones(
+        self, *, since: datetime
+    ) -> list[tuple[Subscription, User]]:
+        """Триал-подписки, у которых хотя бы один из notified_trial_* флагов
+        ещё не выставлен. Используется в job `check_trial_milestones`.
+
+        `since` ограничивает выборку (обычно `now - 7 дней`), чтобы скан не
+        разрастался. После выставления всех трёх флагов подписка выпадает
+        из выборки.
+        """
+        res = await self.session.execute(
+            select(Subscription, User)
+            .join(User, User.id == Subscription.user_id)
+            .where(
+                Subscription.is_trial.is_(True),
+                Subscription.created_at >= since,
+                or_(
+                    Subscription.notified_trial_mid.is_(False),
+                    Subscription.notified_trial_last_day.is_(False),
+                    Subscription.notified_trial_post_expire.is_(False),
+                ),
+            )
+        )
+        return list(res.all())
+
     async def due_monthly_resets(self, now: datetime) -> list[Subscription]:
         normalized_now = _normalize_utc_datetime(now) or datetime.now(timezone.utc)
         res = await self.session.execute(

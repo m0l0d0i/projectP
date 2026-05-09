@@ -19,6 +19,8 @@ from app.services.notifications import (
     check_monthly_traffic_reset,
     check_support_ticket_auto_close,
     check_traffic_exhaustion,
+    check_trial_milestones,
+    check_weekly_usage_report,
 )
 from app.services.outbox import OutboxDispatcher
 from app.services.payment_polling import process_pending_platega_invoices
@@ -228,6 +230,26 @@ def build_scheduler(
         kwargs=notif_kwargs,
         id='check_traffic_exhaustion',
         name='check_traffic_exhaustion',
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        check_trial_milestones,
+        'interval',
+        hours=1,
+        kwargs=notif_kwargs,
+        id='check_trial_milestones',
+        name='check_trial_milestones',
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        check_weekly_usage_report,
+        'interval',
+        hours=24,
+        kwargs=notif_kwargs,
+        id='check_weekly_usage_report',
+        name='check_weekly_usage_report',
         replace_existing=True,
     )
 

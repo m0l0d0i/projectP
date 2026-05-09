@@ -309,6 +309,9 @@ class Subscription(TimestampMixin, Base):
     notified_exhausted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text('false'), nullable=False)
     notified_low_traffic: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text('false'), nullable=False)
     notified_expired: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text('false'), nullable=False)
+    notified_trial_mid: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text('false'), nullable=False)
+    notified_trial_last_day: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text('false'), nullable=False)
+    notified_trial_post_expire: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text('false'), nullable=False)
 
     user: Mapped['User'] = relationship(back_populates='subscriptions')
     tariff_plan: Mapped['TariffPlan | None'] = relationship(back_populates='subscriptions')
