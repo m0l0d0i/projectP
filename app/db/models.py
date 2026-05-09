@@ -150,6 +150,8 @@ class AuditAction(str, enum.Enum):
     broadcast_created = 'broadcast_created'
     node_registry_updated = 'node_registry_updated'
     routing_profile_updated = 'routing_profile_updated'
+    notification_rule_toggled = 'notification_rule_toggled'
+    notification_rule_updated = 'notification_rule_updated'
 
 
 class AuditActorType(str, enum.Enum):

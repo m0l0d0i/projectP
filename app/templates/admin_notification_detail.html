@@ -28,6 +28,30 @@
     </div>
 
     <div class="flex flex-wrap gap-3">
+      <form
+        method="post"
+        action="/admin/notifications/{{ rule.code }}/toggle"
+        data-confirm="{% if rule.is_enabled %}Выключить правило «{{ rule.code }}»? Уведомления этого сценария перестанут отправляться.{% else %}Включить правило «{{ rule.code }}»? Уведомления начнут отправляться согласно расписанию job'а.{% endif %}"
+      >
+        {% if rule.is_enabled %}
+        <button
+          type="submit"
+          title="Выключить правило"
+          class="inline-flex items-center rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-200 hover:border-amber-400 hover:text-amber-100"
+        >
+          💤 Выключить
+        </button>
+        {% else %}
+        <button
+          type="submit"
+          title="Включить правило"
+          class="inline-flex items-center rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 hover:border-emerald-400 hover:text-emerald-100"
+        >
+          ✅ Включить
+        </button>
+        {% endif %}
+      </form>
+
       <a
         href="/admin/notifications/"
         title="Вернуться к списку правил"
@@ -73,36 +97,175 @@
     </div>
   </div>
 
-  <div class="grid gap-6 xl:grid-cols-2">
-    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
-      <div class="flex items-center gap-2">
-        <h2 class="text-xl font-semibold text-white">Текст шаблона</h2>
-        <span
-          class="help-dot"
-          tabindex="0"
-          data-tooltip="Шаблон рендерится через Jinja2 SandboxedEnvironment. Доступные переменные зависят от точки вызова в коде; при ошибке рендера диспатчер использует вшитый fallback и инкрементит status=fallback."
-        >?</span>
-      </div>
-      <pre class="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-200">{{ rule.template_text }}</pre>
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex items-center gap-2">
+      <h2 class="text-xl font-semibold text-white">Предпросмотр</h2>
+      <span
+        class="help-dot"
+        tabindex="0"
+        data-tooltip="Рендер через тот же Jinja2 SandboxedEnvironment, что и в проде. Контекст — фиктивный набор плейсхолдеров (tariff_name, expire_date, days_left, traffic_used_gb, …). Отсутствующие переменные рендерятся как ⟨name⟩."
+      >?</span>
     </div>
+    <p class="mt-2 text-sm text-slate-400">
+      Рендер шаблона с placeholder-контекстом. Реальные переменные зависят от точки вызова в коде —
+      смотрите аргументы <span class="text-slate-200">context=</span> в <span class="text-slate-200">app/services/notifications.py</span>.
+    </p>
 
-    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
-      <div class="flex items-center gap-2">
-        <h2 class="text-xl font-semibold text-white">Inline-клавиатура (JSON)</h2>
-        <span
-          class="help-dot"
-          tabindex="0"
-          data-tooltip="Формат: [[{text, url|callback_data}, ...], ...]. Все строки прогоняются через Jinja2. Если поле пусто — диспатчер оставит вшитую клавиатуру (если есть) или отправит сообщение без кнопок."
-        >?</span>
-      </div>
-      {% if rule.keyboard_preview %}
-      <pre class="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-800 bg-slate-950 p-4 text-xs text-slate-200">{{ rule.keyboard_preview }}</pre>
-      {% else %}
-      <div class="mt-4 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-6 text-sm text-slate-400">
-        Клавиатура не задана — диспатчер использует <span class="text-slate-200">default_reply_markup</span> из вызывающего кода.
-      </div>
-      {% endif %}
+    {% if rule.preview_error %}
+    <div class="mt-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+      ❌ Ошибка рендера: {{ rule.preview_error }}
     </div>
+    {% else %}
+    <div class="mt-4 rounded-2xl border border-cyan-500/20 bg-slate-950 p-4">
+      <div class="text-xs uppercase tracking-wider text-cyan-300/80">Так увидит пользователь</div>
+      <pre class="mt-2 whitespace-pre-wrap break-words text-sm text-slate-100">{{ rule.preview_text }}</pre>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex items-center gap-2">
+      <h2 class="text-xl font-semibold text-white">Редактирование</h2>
+      <span
+        class="help-dot"
+        tabindex="0"
+        data-tooltip="Изменения применяются мгновенно ко всем последующим вызовам диспатчера. Cooldown в Redis по уже отправленным уведомлениям не сбрасывается. Для тест-отправки на свой tg_id используйте кнопку Test send (появится в следующем коммите)."
+      >?</span>
+    </div>
+    <p class="mt-2 text-sm text-slate-400">
+      Все поля сохраняются одной кнопкой. Пустое поле клавиатуры или segment_filter полностью очищает значение в БД.
+    </p>
+
+    <form method="post" action="/admin/notifications/{{ rule.code }}" class="mt-6 grid gap-5">
+      <div>
+        <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+          <span>Текст шаблона (Jinja2)</span>
+          <span
+            class="help-dot"
+            tabindex="0"
+            data-tooltip="Можно использовать {{ '{{' }} variable {{ '}}' }} и {{ '{%' }} if … {{ '%}' }}-блоки. Запрещены опасные операции (sandbox). HTML-разметка передаётся в Telegram как есть, если default_parse_mode=HTML в вызывающем коде."
+          >?</span>
+        </label>
+        <textarea
+          name="template_text"
+          rows="6"
+          required
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 font-mono"
+        >{{ rule.template_text }}</textarea>
+      </div>
+
+      <div>
+        <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+          <span>Inline-клавиатура (JSON, опционально)</span>
+          <span
+            class="help-dot"
+            tabindex="0"
+            data-tooltip="Формат: [[{text, url|callback_data}, ...], ...]. Все строки прогоняются через Jinja2. Очистите поле, чтобы dispatcher использовал вшитую клавиатуру из вызывающего кода."
+          >?</span>
+        </label>
+        <textarea
+          name="template_keyboard_json_raw"
+          rows="8"
+          placeholder='[[{"text":"Купить", "callback_data":"buy"}]]'
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-xs text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 font-mono"
+        >{% if rule.keyboard_preview %}{{ rule.keyboard_preview }}{% endif %}</textarea>
+        <div class="mt-2 text-xs text-slate-500">
+          Пустое поле = очистить клавиатуру (диспатчер оставит default_reply_markup из вызывающего кода).
+        </div>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-3">
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Cooldown (сек)</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Минимальный интервал между отправками одному пользователю по этому коду. 0 = без cooldown'а; отсечка тогда идёт по correlation_key outbox'а."
+            >?</span>
+          </label>
+          <input
+            type="number"
+            name="cooldown_seconds"
+            min="0"
+            value="{{ rule.cooldown_seconds }}"
+            required
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >
+        </div>
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Priority</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Используется для сортировки в админке (по возрастанию). Меньше = выше в списке."
+            >?</span>
+          </label>
+          <input
+            type="number"
+            name="priority"
+            value="{{ rule.priority }}"
+            required
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >
+        </div>
+        <div>
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Описание (≤ 255)</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Произвольное краткое описание сценария — отображается в списке правил. Пустое поле = очистить."
+            >?</span>
+          </label>
+          <input
+            type="text"
+            name="description"
+            maxlength="255"
+            value="{{ rule.description or '' }}"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+          >
+        </div>
+      </div>
+
+      <div>
+        <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+          <span>Segment filter (JSON-объект, опционально)</span>
+          <span
+            class="help-dot"
+            tabindex="0"
+            data-tooltip="Резерв на будущее. На текущем этапе dispatcher не использует это поле для дополнительной фильтрации."
+          >?</span>
+        </label>
+        <textarea
+          name="segment_filter_json_raw"
+          rows="3"
+          placeholder='{"only_paid_users": true}'
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-xs text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 font-mono"
+        >{% if rule.segment_preview %}{{ rule.segment_preview }}{% endif %}</textarea>
+        <div class="mt-2 text-xs text-slate-500">
+          Пустое поле = очистить фильтр.
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-3">
+        <button
+          type="submit"
+          title="Сохранить правило"
+          class="inline-flex items-center rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+        >
+          Сохранить
+        </button>
+        <a
+          href="/admin/notifications/{{ rule.code }}"
+          title="Сбросить введённые изменения и перезагрузить карточку"
+          class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+        >
+          Отмена
+        </a>
+      </div>
+    </form>
   </div>
 
   <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
@@ -174,8 +337,7 @@
       </div>
     </dl>
     <p class="mt-4 text-xs text-slate-500">
-      Редактирование текста и тоггл будут доступны в следующем коммите. Сейчас правило можно изменить
-      только через миграцию или прямой UPDATE в таблице <span class="text-slate-200">notification_rules</span>.
+      Test-send (отправка предпросмотра на свой tg_id) появится в следующем коммите.
     </p>
   </div>
 </div>

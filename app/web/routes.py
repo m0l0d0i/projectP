@@ -3329,6 +3329,109 @@ async def admin_rules_update(
     return _redirect_with_message('/admin/rules/', success='Ссылки правил обновлены')
 
 
+_NOTIFICATION_PREVIEW_CONTEXT: dict[str, Any] = {
+    'tariff_name': 'Премиум 1 месяц',
+    'tariff_price': '299.00 ₽',
+    'expire_date': '12.05.2026 23:59',
+    'expire_at': '12.05.2026 23:59',
+    'days_left': 3,
+    'hours_left': 2,
+    'traffic_used_gb': 90,
+    'traffic_limit_gb': 100,
+    'traffic_remaining_gb': 10,
+    'percent_used': 90,
+    'username': 'alice',
+    'first_name': 'Алиса',
+    'subscription_id': 42,
+    'user_id': 1234567,
+    'tg_id': 1234567,
+    'topup_50_url': 'https://t.me/your_bot?start=topup_50',
+    'topup_100_url': 'https://t.me/your_bot?start=topup_100',
+    'renew_url': 'https://t.me/your_bot?start=renew',
+}
+
+
+class _PreviewUndefined:
+    """Безопасная Jinja-undefined: рендерит `⟨name⟩` вместо ошибки."""
+
+    __slots__ = ('_name',)
+
+    def __init__(self, name: str = 'undefined') -> None:
+        self._name = name
+
+    def __getattr__(self, attr: str) -> '_PreviewUndefined':
+        return _PreviewUndefined(f'{self._name}.{attr}')
+
+    def __getitem__(self, key: object) -> '_PreviewUndefined':
+        return _PreviewUndefined(f'{self._name}[{key}]')
+
+    def __str__(self) -> str:
+        return f'⟨{self._name}⟩'
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __iter__(self):
+        return iter(())
+
+
+def _build_preview_context() -> dict[str, Any]:
+    """Контекст-заглушка для preview-рендера; реальные переменные перекрывают
+    placeholder'ы из `_NOTIFICATION_PREVIEW_CONTEXT`, отсутствующие — попадают
+    в `_PreviewUndefined`-логику Jinja."""
+    return dict(_NOTIFICATION_PREVIEW_CONTEXT)
+
+
+def _render_notification_preview(template_text: str) -> tuple[str | None, str | None]:
+    """Возвращает (rendered_text, error_message). Использует тот же
+    SandboxedEnvironment что и dispatcher, но с `_PreviewUndefined`."""
+    from jinja2.exceptions import TemplateError as _Jinja2TemplateError
+    from jinja2.sandbox import SandboxedEnvironment as _SandboxedEnvironment
+
+    env = _SandboxedEnvironment(autoescape=False, keep_trailing_newline=True)
+
+    ctx = _build_preview_context()
+
+    class _Resolver(dict):
+        def __missing__(self, key):
+            return _PreviewUndefined(name=key)
+
+    try:
+        template = env.from_string(template_text)
+        rendered = template.render(_Resolver(ctx))
+        return rendered, None
+    except _Jinja2TemplateError as exc:
+        return None, str(exc)
+    except Exception as exc:  # pragma: no cover — defensive
+        return None, f'{type(exc).__name__}: {exc}'
+
+
+def _validate_notification_keyboard_json(parsed: object) -> str | None:
+    """Структурная валидация: list of lists of dicts с text + url|callback_data.
+    Возвращает None при успехе, иначе сообщение об ошибке."""
+    if not isinstance(parsed, list) or not parsed:
+        return 'Клавиатура должна быть непустым массивом строк'
+    for row_idx, row in enumerate(parsed, start=1):
+        if not isinstance(row, list) or not row:
+            return f'Строка {row_idx} должна быть непустым массивом кнопок'
+        for btn_idx, btn in enumerate(row, start=1):
+            if not isinstance(btn, dict):
+                return f'Кнопка {row_idx}.{btn_idx}: ожидался объект'
+            text_raw = btn.get('text')
+            if not isinstance(text_raw, str) or not text_raw.strip():
+                return f'Кнопка {row_idx}.{btn_idx}: поле "text" обязательно'
+            url_raw = btn.get('url')
+            cb_raw = btn.get('callback_data')
+            has_url = isinstance(url_raw, str) and url_raw.strip()
+            has_cb = isinstance(cb_raw, str) and cb_raw.strip()
+            if not (has_url or has_cb):
+                return (
+                    f'Кнопка {row_idx}.{btn_idx}: нужен хотя бы один из'
+                    ' "url" или "callback_data"'
+                )
+    return None
+
+
 def _format_cooldown(seconds: int) -> str:
     """Человеко-читаемая длительность cooldown'а: 0 → '—', 86400 → '24ч'."""
     if seconds <= 0:
@@ -3342,7 +3445,12 @@ def _format_cooldown(seconds: int) -> str:
     return f'{seconds}с'
 
 
-def _notification_rule_view(rule, counters: dict[str, dict[str, float]] | None = None):
+def _notification_rule_view(
+    rule,
+    counters: dict[str, dict[str, float]] | None = None,
+    *,
+    with_preview: bool = False,
+):
     counters = counters or {}
     rule_counters = counters.get(rule.code, {})
     sent_total = int(
@@ -3370,6 +3478,11 @@ def _notification_rule_view(rule, counters: dict[str, dict[str, float]] | None =
         except (TypeError, ValueError):
             segment_preview = repr(rule.segment_filter_json)
 
+    preview_text: str | None = None
+    preview_error: str | None = None
+    if with_preview:
+        preview_text, preview_error = _render_notification_preview(rule.template_text)
+
     return SimpleNamespace(
         id=rule.id,
         code=rule.code,
@@ -3391,6 +3504,8 @@ def _notification_rule_view(rule, counters: dict[str, dict[str, float]] | None =
         blocked_cooldown=int(rule_counters.get('blocked_cooldown', 0.0)),
         blocked_template_error=int(rule_counters.get('blocked_template_error', 0.0)),
         blocked_snoozed=int(rule_counters.get('blocked_snoozed', 0.0)),
+        preview_text=preview_text,
+        preview_error=preview_error,
     )
 
 
@@ -3446,7 +3561,7 @@ async def admin_notification_detail(request: Request, code: str):
             error=f'Правило с кодом «{code}» не найдено',
         )
 
-    rule_view = _notification_rule_view(rule, counters)
+    rule_view = _notification_rule_view(rule, counters, with_preview=True)
 
     return templates.TemplateResponse(
         request,
@@ -3457,6 +3572,151 @@ async def admin_notification_detail(request: Request, code: str):
             'success_message': request.query_params.get('success'),
             'error_message': request.query_params.get('error'),
         },
+    )
+
+
+@router.post(
+    '/admin/notifications/{code}/toggle',
+    dependencies=[Depends(require_web_admin)],
+)
+async def admin_notification_toggle(request: Request, code: str):
+    sessionmaker = request.app.state.sessionmaker
+
+    async with sessionmaker.begin() as session:
+        repo = NotificationRuleRepository(session)
+        audit_repo = AuditLogRepository(session)
+        rule = await repo.get_by_code(code)
+        if rule is None:
+            return _redirect_with_message(
+                '/admin/notifications/',
+                error=f'Правило с кодом «{code}» не найдено',
+            )
+
+        new_state = not rule.is_enabled
+        await repo.update_rule(rule, is_enabled=new_state)
+        await audit_repo.create(
+            action=AuditAction.notification_rule_toggled,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            entity_type='notification_rule',
+            entity_id=str(rule.id),
+            details={'code': rule.code, 'is_enabled': new_state},
+        )
+
+    state_label = 'включено' if new_state else 'выключено'
+    return _redirect_with_message(
+        f'/admin/notifications/{code}',
+        success=f'Правило «{code}» {state_label}',
+    )
+
+
+@router.post('/admin/notifications/{code}', dependencies=[Depends(require_web_admin)])
+async def admin_notification_update(
+    request: Request,
+    code: str,
+    template_text: str = Form(...),
+    template_keyboard_json_raw: str = Form(default=''),
+    cooldown_seconds: int = Form(...),
+    priority: int = Form(...),
+    description: str = Form(default=''),
+    segment_filter_json_raw: str = Form(default=''),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect_path = f'/admin/notifications/{code}'
+
+    text_value = (template_text or '').strip()
+    if not text_value:
+        return _redirect_with_message(
+            redirect_path, error='Текст шаблона не может быть пустым',
+        )
+
+    if cooldown_seconds < 0:
+        return _redirect_with_message(
+            redirect_path, error='Cooldown должен быть ≥ 0',
+        )
+
+    keyboard_value: list[Any] | None = None
+    clear_keyboard = False
+    raw_keyboard = (template_keyboard_json_raw or '').strip()
+    if not raw_keyboard:
+        clear_keyboard = True
+    else:
+        try:
+            keyboard_value = json.loads(raw_keyboard)
+        except json.JSONDecodeError as exc:
+            return _redirect_with_message(
+                redirect_path, error=f'Невалидный JSON клавиатуры: {exc.msg}',
+            )
+        kb_error = _validate_notification_keyboard_json(keyboard_value)
+        if kb_error is not None:
+            return _redirect_with_message(redirect_path, error=kb_error)
+
+    segment_value: dict[str, Any] | None = None
+    clear_segment = False
+    raw_segment = (segment_filter_json_raw or '').strip()
+    if not raw_segment:
+        clear_segment = True
+    else:
+        try:
+            parsed_segment = json.loads(raw_segment)
+        except json.JSONDecodeError as exc:
+            return _redirect_with_message(
+                redirect_path, error=f'Невалидный JSON segment_filter: {exc.msg}',
+            )
+        if not isinstance(parsed_segment, dict):
+            return _redirect_with_message(
+                redirect_path, error='segment_filter должен быть JSON-объектом',
+            )
+        segment_value = parsed_segment
+
+    description_value = (description or '').strip()
+    if len(description_value) > 255:
+        return _redirect_with_message(
+            redirect_path, error='Описание не должно превышать 255 символов',
+        )
+
+    async with sessionmaker.begin() as session:
+        repo = NotificationRuleRepository(session)
+        audit_repo = AuditLogRepository(session)
+        rule = await repo.get_by_code(code)
+        if rule is None:
+            return _redirect_with_message(
+                '/admin/notifications/',
+                error=f'Правило с кодом «{code}» не найдено',
+            )
+
+        try:
+            await repo.update_rule(
+                rule,
+                template_text=text_value,
+                template_keyboard_json=keyboard_value,
+                clear_keyboard=clear_keyboard,
+                cooldown_seconds=cooldown_seconds,
+                priority=priority,
+                description=description_value,
+                segment_filter_json=segment_value,
+                clear_segment_filter=clear_segment,
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect_path, error=str(exc))
+
+        await audit_repo.create(
+            action=AuditAction.notification_rule_updated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            entity_type='notification_rule',
+            entity_id=str(rule.id),
+            details={
+                'code': rule.code,
+                'cooldown_seconds': rule.cooldown_seconds,
+                'priority': rule.priority,
+                'has_keyboard': rule.template_keyboard_json is not None,
+                'has_segment_filter': rule.segment_filter_json is not None,
+            },
+        )
+
+    return _redirect_with_message(
+        redirect_path, success='Правило сохранено',
     )
 
 
