@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import NotificationRule
 from app.db.repositories import NotificationRuleRepository, OutboxRepository
+from app.observability.metrics import NOTIFICATIONS_BLOCKED, NOTIFICATIONS_SENT
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class NotificationDispatcher:
         rule = await NotificationRuleRepository(session).get_by_code(code)
         if rule is not None and not rule.is_enabled:
             logger.debug('Notification rule %s is disabled, skipping', code)
+            NOTIFICATIONS_BLOCKED.labels(code=code, reason='disabled').inc()
             return False
 
         ctx: dict[str, Any] = dict(context or {})
@@ -81,6 +83,7 @@ class NotificationDispatcher:
         text = default_text
         reply_markup = default_reply_markup
         parse_mode = default_parse_mode
+        send_status = 'ok'
 
         if rule is not None:
             try:
@@ -89,7 +92,9 @@ class NotificationDispatcher:
                 logger.exception(
                     'Failed to render notification template for code=%s; using fallback', code,
                 )
+                NOTIFICATIONS_BLOCKED.labels(code=code, reason='template_error').inc()
                 text = default_text
+                send_status = 'fallback'
 
             if rule.template_keyboard_json is not None:
                 rendered_kb = self._render_keyboard(rule.template_keyboard_json, ctx)
@@ -105,6 +110,7 @@ class NotificationDispatcher:
                         'Notification cooldown active for user_id=%s code=%s; skipping',
                         user_id, code,
                     )
+                    NOTIFICATIONS_BLOCKED.labels(code=code, reason='cooldown').inc()
                     return False
 
         await OutboxRepository(session).enqueue_tg_message(
@@ -115,6 +121,7 @@ class NotificationDispatcher:
             user_id=user_id,
             correlation_key=correlation_key,
         )
+        NOTIFICATIONS_SENT.labels(code=code, status=send_status).inc()
         return True
 
     @staticmethod

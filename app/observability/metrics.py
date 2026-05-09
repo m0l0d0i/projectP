@@ -21,3 +21,14 @@ SUPPORT_TICKETS_OPENED = Counter('vpn_bot_support_tickets_opened_total', 'Suppor
 SUPPORT_TICKETS_CLOSED = Counter('vpn_bot_support_tickets_closed_total', 'Support tickets closed', ['reason'])
 MARZBAN_ERRORS = Counter('vpn_bot_marzban_errors_total', 'Marzban API errors', ['kind'])
 EXTERNAL_API_LATENCY = Histogram('vpn_bot_external_api_latency_seconds', 'External API latency', ['service', 'operation'])
+
+NOTIFICATIONS_SENT = Counter(
+    'vpn_bot_notifications_sent_total',
+    'FEA-NOTIF: уведомления, поставленные в outbox',
+    ['code', 'status'],
+)
+NOTIFICATIONS_BLOCKED = Counter(
+    'vpn_bot_notifications_blocked_total',
+    'FEA-NOTIF: пропуски/ошибки рендера в NotificationDispatcher',
+    ['code', 'reason'],
+)
