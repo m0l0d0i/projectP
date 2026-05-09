@@ -32,3 +32,37 @@ NOTIFICATIONS_BLOCKED = Counter(
     'FEA-NOTIF: пропуски/ошибки рендера в NotificationDispatcher',
     ['code', 'reason'],
 )
+
+
+def notification_counters_snapshot() -> dict[str, dict[str, float]]:
+    """Снимок in-process Prometheus-counter'ов NotificationDispatcher.
+
+    Возвращает `{code: {'sent_ok': N, 'sent_fallback': N,
+    'blocked_<reason>': N}}`. Значения — cumulative с момента запуска
+    процесса (prometheus_client не хранит time-windowed данные).
+    Для 7д/30д нужно опрашивать внешний Prometheus с `increase()`
+    или агрегировать по `outbox_messages.created_at`.
+    """
+    snapshot: dict[str, dict[str, float]] = {}
+
+    for metric in NOTIFICATIONS_SENT.collect():
+        for sample in metric.samples:
+            if not sample.name.endswith('_total'):
+                continue
+            code = sample.labels.get('code')
+            status = sample.labels.get('status')
+            if not code or not status:
+                continue
+            snapshot.setdefault(code, {})[f'sent_{status}'] = sample.value
+
+    for metric in NOTIFICATIONS_BLOCKED.collect():
+        for sample in metric.samples:
+            if not sample.name.endswith('_total'):
+                continue
+            code = sample.labels.get('code')
+            reason = sample.labels.get('reason')
+            if not code or not reason:
+                continue
+            snapshot.setdefault(code, {})[f'blocked_{reason}'] = sample.value
+
+    return snapshot

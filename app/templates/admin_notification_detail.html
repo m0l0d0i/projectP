@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}Правило {{ rule.code }} — уведомления{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">
+        <a href="/admin/notifications/" class="hover:text-cyan-300">Уведомления</a>
+        / {{ rule.code }}
+      </div>
+      <div class="mt-4 flex items-center gap-2">
+        <h1 class="text-3xl font-bold text-white break-all">{{ rule.code }}</h1>
+        {% if rule.is_enabled %}
+        <span class="inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
+          ✅ Включено
+        </span>
+        {% else %}
+        <span class="inline-flex rounded-full bg-slate-800 px-3 py-1 text-xs font-medium text-slate-400">
+          💤 Выключено
+        </span>
+        {% endif %}
+      </div>
+      {% if rule.description %}
+      <p class="mt-2 text-slate-400">{{ rule.description }}</p>
+      {% endif %}
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/notifications/"
+        title="Вернуться к списку правил"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+      >
+        ← К списку правил
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+  <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+    ✅ {{ success_message }}
+  </div>
+  {% endif %}
+
+  {% if error_message %}
+  <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+    ❌ {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Cooldown</div>
+      <div class="mt-2 text-2xl font-semibold text-white">{{ rule.cooldown_label }}</div>
+      <div class="mt-1 text-xs text-slate-500">{{ rule.cooldown_seconds }} секунд</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Priority</div>
+      <div class="mt-2 text-2xl font-semibold text-white">{{ rule.priority }}</div>
+      <div class="mt-1 text-xs text-slate-500">меньше = важнее</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Отправлено всего</div>
+      <div class="mt-2 text-2xl font-semibold text-cyan-300">{{ rule.sent_total }}</div>
+      <div class="mt-1 text-xs text-slate-500">с момента запуска процесса</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Заблокировано</div>
+      <div class="mt-2 text-2xl font-semibold text-amber-300">{{ rule.blocked_total }}</div>
+      <div class="mt-1 text-xs text-slate-500">с момента запуска процесса</div>
+    </div>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-2">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2">
+        <h2 class="text-xl font-semibold text-white">Текст шаблона</h2>
+        <span
+          class="help-dot"
+          tabindex="0"
+          data-tooltip="Шаблон рендерится через Jinja2 SandboxedEnvironment. Доступные переменные зависят от точки вызова в коде; при ошибке рендера диспатчер использует вшитый fallback и инкрементит status=fallback."
+        >?</span>
+      </div>
+      <pre class="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-200">{{ rule.template_text }}</pre>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div class="flex items-center gap-2">
+        <h2 class="text-xl font-semibold text-white">Inline-клавиатура (JSON)</h2>
+        <span
+          class="help-dot"
+          tabindex="0"
+          data-tooltip="Формат: [[{text, url|callback_data}, ...], ...]. Все строки прогоняются через Jinja2. Если поле пусто — диспатчер оставит вшитую клавиатуру (если есть) или отправит сообщение без кнопок."
+        >?</span>
+      </div>
+      {% if rule.keyboard_preview %}
+      <pre class="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-800 bg-slate-950 p-4 text-xs text-slate-200">{{ rule.keyboard_preview }}</pre>
+      {% else %}
+      <div class="mt-4 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-6 text-sm text-slate-400">
+        Клавиатура не задана — диспатчер использует <span class="text-slate-200">default_reply_markup</span> из вызывающего кода.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex items-center gap-2">
+      <h2 class="text-xl font-semibold text-white">Метрики Prometheus</h2>
+      <span
+        class="help-dot"
+        tabindex="0"
+        data-tooltip="Значения in-process Prometheus-counter'ов: vpn_bot_notifications_sent_total{code,status} и vpn_bot_notifications_blocked_total{code,reason}. Сбрасываются при рестарте процесса."
+      >?</span>
+    </div>
+    <p class="mt-2 text-sm text-slate-400">
+      Cumulative с момента запуска процесса. Для time-windowed графиков используйте внешний Prometheus с
+      <span class="text-slate-200">increase()</span> по соответствующим лейблам.
+    </p>
+
+    <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+        <div class="text-xs uppercase tracking-wider text-emerald-300/80">sent · ok</div>
+        <div class="mt-1 text-xl font-semibold text-emerald-200">{{ rule.sent_ok }}</div>
+      </div>
+      <div class="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+        <div class="text-xs uppercase tracking-wider text-amber-300/80">sent · fallback</div>
+        <div class="mt-1 text-xl font-semibold text-amber-200">{{ rule.sent_fallback }}</div>
+      </div>
+      <div class="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3">
+        <div class="text-xs uppercase tracking-wider text-slate-400">blocked · disabled</div>
+        <div class="mt-1 text-xl font-semibold text-slate-200">{{ rule.blocked_disabled }}</div>
+      </div>
+      <div class="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3">
+        <div class="text-xs uppercase tracking-wider text-slate-400">blocked · cooldown</div>
+        <div class="mt-1 text-xl font-semibold text-slate-200">{{ rule.blocked_cooldown }}</div>
+      </div>
+      <div class="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3">
+        <div class="text-xs uppercase tracking-wider text-slate-400">blocked · snoozed</div>
+        <div class="mt-1 text-xl font-semibold text-slate-200">{{ rule.blocked_snoozed }}</div>
+      </div>
+      <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3">
+        <div class="text-xs uppercase tracking-wider text-rose-300/80">blocked · template_error</div>
+        <div class="mt-1 text-xl font-semibold text-rose-200">{{ rule.blocked_template_error }}</div>
+      </div>
+    </div>
+  </div>
+
+  {% if rule.segment_preview %}
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex items-center gap-2">
+      <h2 class="text-xl font-semibold text-white">Segment filter (JSON)</h2>
+      <span
+        class="help-dot"
+        tabindex="0"
+        data-tooltip="Опциональный JSON-фильтр по сегменту аудитории. На текущий момент дополнительной фильтрации dispatcher не делает — поле зарезервировано для будущих задач."
+      >?</span>
+    </div>
+    <pre class="mt-4 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-800 bg-slate-950 p-4 text-xs text-slate-200">{{ rule.segment_preview }}</pre>
+  </div>
+  {% endif %}
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <h2 class="text-xl font-semibold text-white">Служебное</h2>
+    <dl class="mt-4 grid gap-3 sm:grid-cols-2">
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+        <dt class="text-xs uppercase tracking-wider text-slate-500">ID правила</dt>
+        <dd class="mt-1 text-sm text-slate-200">{{ rule.id }}</dd>
+      </div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
+        <dt class="text-xs uppercase tracking-wider text-slate-500">Обновлено</dt>
+        <dd class="mt-1 text-sm text-slate-200">{{ rule.updated_at or '—' }}</dd>
+      </div>
+    </dl>
+    <p class="mt-4 text-xs text-slate-500">
+      Редактирование текста и тоггл будут доступны в следующем коммите. Сейчас правило можно изменить
+      только через миграцию или прямой UPDATE в таблице <span class="text-slate-200">notification_rules</span>.
+    </p>
+  </div>
+</div>
+{% endblock %}

@@ -50,6 +50,7 @@ from app.db.repositories import (
     BroadcastJobRepository,
     InvoiceRepository,
     MarzbanPageSettingsRepository,
+    NotificationRuleRepository,
     PricingRuleRepository,
     PromoRepository,
     SubscriptionRepository,
@@ -74,6 +75,7 @@ from app.services.web_admin_auth import verify_password
 from app.services.subscription_urls import build_canonical_subscription_url, configured_public_subscription_origin
 from app.services.subscriptions import SubscriptionService
 from app.services.tariffs import PricingService
+from app.observability.metrics import notification_counters_snapshot
 from app.utils.formatters import DISPLAY_TIMEZONE, bytes_to_gb, format_dt
 from app.utils.runtime_settings import (
     effective_bool_from_row,
@@ -3325,6 +3327,138 @@ async def admin_rules_update(
         )
 
     return _redirect_with_message('/admin/rules/', success='Ссылки правил обновлены')
+
+
+def _format_cooldown(seconds: int) -> str:
+    """Человеко-читаемая длительность cooldown'а: 0 → '—', 86400 → '24ч'."""
+    if seconds <= 0:
+        return '—'
+    if seconds % 86400 == 0:
+        return f'{seconds // 86400}д'
+    if seconds % 3600 == 0:
+        return f'{seconds // 3600}ч'
+    if seconds % 60 == 0:
+        return f'{seconds // 60}м'
+    return f'{seconds}с'
+
+
+def _notification_rule_view(rule, counters: dict[str, dict[str, float]] | None = None):
+    counters = counters or {}
+    rule_counters = counters.get(rule.code, {})
+    sent_total = int(
+        rule_counters.get('sent_ok', 0.0) + rule_counters.get('sent_fallback', 0.0)
+    )
+    blocked_total = int(
+        sum(value for key, value in rule_counters.items() if key.startswith('blocked_'))
+    )
+
+    keyboard_preview = None
+    if rule.template_keyboard_json is not None:
+        try:
+            keyboard_preview = json.dumps(
+                rule.template_keyboard_json, ensure_ascii=False, indent=2,
+            )
+        except (TypeError, ValueError):
+            keyboard_preview = repr(rule.template_keyboard_json)
+
+    segment_preview = None
+    if rule.segment_filter_json is not None:
+        try:
+            segment_preview = json.dumps(
+                rule.segment_filter_json, ensure_ascii=False, indent=2,
+            )
+        except (TypeError, ValueError):
+            segment_preview = repr(rule.segment_filter_json)
+
+    return SimpleNamespace(
+        id=rule.id,
+        code=rule.code,
+        is_enabled=rule.is_enabled,
+        template_text=rule.template_text,
+        template_keyboard_json=rule.template_keyboard_json,
+        keyboard_preview=keyboard_preview,
+        segment_preview=segment_preview,
+        cooldown_seconds=rule.cooldown_seconds,
+        cooldown_label=_format_cooldown(rule.cooldown_seconds),
+        priority=rule.priority,
+        description=rule.description,
+        updated_at=format_dt(getattr(rule, 'updated_at', None)),
+        sent_total=sent_total,
+        blocked_total=blocked_total,
+        sent_ok=int(rule_counters.get('sent_ok', 0.0)),
+        sent_fallback=int(rule_counters.get('sent_fallback', 0.0)),
+        blocked_disabled=int(rule_counters.get('blocked_disabled', 0.0)),
+        blocked_cooldown=int(rule_counters.get('blocked_cooldown', 0.0)),
+        blocked_template_error=int(rule_counters.get('blocked_template_error', 0.0)),
+        blocked_snoozed=int(rule_counters.get('blocked_snoozed', 0.0)),
+    )
+
+
+@router.get('/admin/notifications/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+async def admin_notifications(request: Request):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+
+    counters = notification_counters_snapshot()
+
+    async with sessionmaker() as session:
+        rules = await NotificationRuleRepository(session).list_all()
+
+    rule_views = [_notification_rule_view(rule, counters) for rule in rules]
+
+    enabled_count = sum(1 for r in rule_views if r.is_enabled)
+    sent_total = sum(r.sent_total for r in rule_views)
+    blocked_total = sum(r.blocked_total for r in rule_views)
+
+    return templates.TemplateResponse(
+        request,
+        'admin_notifications.html',
+        {
+            'current_page': 'notifications',
+            'rules': rule_views,
+            'enabled_count': enabled_count,
+            'rules_total': len(rule_views),
+            'sent_total': sent_total,
+            'blocked_total': blocked_total,
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+@router.get(
+    '/admin/notifications/{code}',
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_web_admin)],
+)
+async def admin_notification_detail(request: Request, code: str):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+
+    counters = notification_counters_snapshot()
+
+    async with sessionmaker() as session:
+        rule = await NotificationRuleRepository(session).get_by_code(code)
+
+    if rule is None:
+        return _redirect_with_message(
+            '/admin/notifications/',
+            error=f'Правило с кодом «{code}» не найдено',
+        )
+
+    rule_view = _notification_rule_view(rule, counters)
+
+    return templates.TemplateResponse(
+        request,
+        'admin_notification_detail.html',
+        {
+            'current_page': 'notifications',
+            'rule': rule_view,
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
 
 @router.get('/admin/tickets/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
 async def admin_tickets(
