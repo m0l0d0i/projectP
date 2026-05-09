@@ -293,6 +293,14 @@ def render_invoice_text(invoice: Invoice, user_balance: Decimal) -> str:
 
     if invoice.purpose == InvoicePurpose.topup:
         cycle_scope = _render_topup_cycle_scope(payload)
+        # FEA-A8: если есть бонусный баланс (например, от промокода) и он
+        # ещё не списан с инвойса — подсказать пользователю про кнопку.
+        balance_hint = ''
+        if money(user_balance) > Decimal('0.00') and balance_used <= Decimal('0.00'):
+            balance_hint = (
+                f'\n💡 На балансе есть {money(user_balance)} ₽ — '
+                'можно списать их кнопкой «Использовать баланс».'
+            )
         return (
             '📦 <b>Докупка трафика</b>\n\n'
             f'🌐 <b>Пакет:</b> {fmt.quote(str(payload.get("topup_title", "")))}\n'
@@ -301,6 +309,7 @@ def render_invoice_text(invoice: Invoice, user_balance: Decimal) -> str:
             f'💰 <b>Баланс:</b> {money(user_balance)} ₽\n'
             f'➖ <b>Списать с баланса:</b> {balance_used} ₽\n'
             f'🧾 <b>К оплате:</b> {payable} ₽'
+            f'{balance_hint}'
         )
 
     return (

@@ -14,9 +14,11 @@
   - Редактор в `/admin/referrals/` (две формы); экран «Мои рефералы» в `profile.py`.
   - Архитектурный инвариант (D3): бонус идёт только на `User.balance`, оттуда — только на оплату инвойса. Withdrawal forbidden.
 - [ ] **FEA-A7 (S, P3).** Branded referral landing `/r/<code>` с кастомным title/avatar.
-- [ ] **FEA-A8 (M, P1, D5).** Улучшение апсейла трафика. Сейчас `PricingService.TOPUPS` (`tariffs.py:127`) — 2 захардкоженных варианта. Кнопка «Докупить трафик» уже встроена в `low_traffic_alert_keyboard` (`keyboards/inline.py:225`).
-  - Перенести `TOPUPS` в DB (новая таблица `traffic_topup_options`). CRUD в `/admin/upsells/traffic/`.
-  - 3-й вариант пакета (+200/+500 ГБ); авто-бейдж «лучшая цена за ГБ»; promo-код применим к topup invoice.
+- [x] **FEA-A8 (M, P1, D5).** Улучшение апсейла трафика. — закрыто Sprint 2.
+  - `PricingService.TOPUPS` перенесён в БД (миграция 27, таблица `traffic_topup_options`); добавлен 3-й пакет `topup200`. CRUD в `/admin/upsells/traffic/` (commit `2f5f427`).
+  - Авто-бейдж «⭐ Лучшая цена/ГБ» проставляется опции с минимальной ценой за ГБ среди включённых (если победитель один). Кастомный `badge_label` имеет приоритет.
+  - Promo-код применим к topup invoice через существующий balance-flow: `redeem` пополняет `User.balance`, в topup-корзине добавлен hint «На балансе есть N ₽ — нажмите Использовать баланс» (`purchase.py:render_invoice_text`). Default flow без auto-apply сохранён.
+  - Перепроектирование `PromoCode` на типы/скидки (kind=bonus|topup_discount|tariff_discount) вынесено в будущий sprint.
 - [ ] **FEA-A9 (M, P2, D5).** Mid-cycle апсейл устройств — сейчас не поддерживается. Устройства задаются только при покупке тарифа.
   - Опция «Добавить устройство к текущей подписке» в `purchase.py` / `vpn.py` если `used_device_count < MAX_CUSTOM_DEVICES`.
   - Цена пропорционально оставшимся дням (или фиксированная, конфиг в `AppSettings.mid_cycle_device_price_mode`).
