@@ -20,6 +20,7 @@
     'antispam': 'Антиспам',
     'rules': 'Правила и документы',
     'notifications': 'Push-уведомления',
+    'upsells_traffic': 'Апсейлы: трафик',
     'broadcasts': 'Рассылки',
     'promocodes': 'Промокоды',
     'marzban_page': 'Страница подписки Marzban',
@@ -41,6 +42,7 @@
     'antispam': 'Пороговые значения и защитные настройки против спама и флуда.',
     'rules': 'Публичные правила, документы и ссылки, которые видит пользователь.',
     'notifications': 'Сценарии smart push-уведомлений (FEA-NOTIF): шаблоны, cooldown, метрики.',
+    'upsells_traffic': 'Опции «докупки» трафика (FEA-A8): CRUD, бейджи, лучшая цена/ГБ.',
     'broadcasts': 'Черновики, отложенные и выполненные рассылки с контентом и кнопками.',
     'promocodes': 'Создание, изменение, архив и контроль использования промокодов.',
     'marzban_page': 'Редактирование, preview и безопасное применение live-страницы Marzban.',
@@ -115,6 +117,10 @@
 
           <a href="/admin/notifications/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'notifications' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
             Push-уведомления
+          </a>
+
+          <a href="/admin/upsells/traffic/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'upsells_traffic' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
+            Апсейлы: трафик
           </a>
 
           <a href="/admin/promocodes/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'promocodes' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">

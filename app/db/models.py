@@ -153,6 +153,10 @@ class AuditAction(str, enum.Enum):
     notification_rule_toggled = 'notification_rule_toggled'
     notification_rule_updated = 'notification_rule_updated'
     notification_rule_test_sent = 'notification_rule_test_sent'
+    traffic_topup_option_created = 'traffic_topup_option_created'
+    traffic_topup_option_updated = 'traffic_topup_option_updated'
+    traffic_topup_option_deleted = 'traffic_topup_option_deleted'
+    traffic_topup_option_toggled = 'traffic_topup_option_toggled'
 
 
 class AuditActorType(str, enum.Enum):

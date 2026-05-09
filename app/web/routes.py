@@ -52,6 +52,7 @@ from app.db.repositories import (
     MarzbanPageSettingsRepository,
     NotificationRuleRepository,
     PricingRuleRepository,
+    TrafficTopupOptionRepository,
     PromoRepository,
     SubscriptionRepository,
     SupportMessageRepository,
@@ -3825,6 +3826,212 @@ async def admin_notification_update(
     return _redirect_with_message(
         redirect_path, success='Правило сохранено',
     )
+
+
+def _topup_option_view(row, *, is_best: bool = False):
+    extra = max(1, int(row.extra_traffic_gb))
+    ppg = (Decimal(str(row.amount)) / Decimal(extra)).quantize(Decimal('0.01'))
+    return SimpleNamespace(
+        id=row.id,
+        code=row.code,
+        title=row.title,
+        extra_traffic_gb=row.extra_traffic_gb,
+        amount=row.amount,
+        is_enabled=row.is_enabled,
+        sort_order=row.sort_order,
+        badge_label=row.badge_label,
+        price_per_gb=ppg,
+        is_best_price=is_best,
+        updated_at=format_dt(getattr(row, 'updated_at', None)),
+    )
+
+
+@router.get('/admin/upsells/traffic/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+async def admin_upsells_traffic(request: Request):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+    async with sessionmaker() as session:
+        rows = await TrafficTopupOptionRepository(session).list_all()
+    enabled_rows = [r for r in rows if r.is_enabled]
+    best_id: int | None = None
+    if len(enabled_rows) >= 2:
+        ratios = {r.id: (Decimal(str(r.amount)) / Decimal(max(1, int(r.extra_traffic_gb)))) for r in enabled_rows}
+        min_v = min(ratios.values())
+        winners = [oid for oid, v in ratios.items() if v == min_v]
+        if len(winners) == 1:
+            best_id = winners[0]
+    options = [_topup_option_view(r, is_best=(r.id == best_id and r.is_enabled)) for r in rows]
+    return templates.TemplateResponse(
+        request,
+        'admin_upsells_traffic.html',
+        {
+            'current_page': 'upsells_traffic',
+            'options': options,
+            'options_total': len(options),
+            'enabled_count': len(enabled_rows),
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+def _parse_topup_form(
+    *,
+    code: str | None,
+    title: str,
+    extra_traffic_gb: int,
+    amount: str,
+    is_enabled: bool,
+    sort_order: int,
+    badge_label: str,
+) -> tuple[dict, str | None]:
+    if code is not None:
+        code_value = (code or '').strip()
+        if not code_value or len(code_value) > 32:
+            return {}, 'Код обязателен и не длиннее 32 символов'
+    else:
+        code_value = None
+    title_value = (title or '').strip()
+    if not title_value or len(title_value) > 64:
+        return {}, 'Название обязательно и не длиннее 64 символов'
+    if extra_traffic_gb <= 0:
+        return {}, 'Объём ГБ должен быть > 0'
+    try:
+        amount_value = Decimal((amount or '').strip().replace(',', '.'))
+    except Exception:
+        return {}, 'Сумма должна быть числом'
+    if amount_value < 0:
+        return {}, 'Сумма должна быть ≥ 0'
+    badge_value = (badge_label or '').strip()
+    if len(badge_value) > 64:
+        return {}, 'Бейдж не длиннее 64 символов'
+    payload = {
+        'title': title_value,
+        'extra_traffic_gb': int(extra_traffic_gb),
+        'amount': amount_value,
+        'is_enabled': bool(is_enabled),
+        'sort_order': int(sort_order),
+        'badge_label': badge_value,
+    }
+    if code_value is not None:
+        payload['code'] = code_value
+    return payload, None
+
+
+@router.post('/admin/upsells/traffic/', dependencies=[Depends(require_web_admin)])
+async def admin_upsells_traffic_create(
+    request: Request,
+    code: str = Form(...),
+    title: str = Form(...),
+    extra_traffic_gb: int = Form(...),
+    amount: str = Form(...),
+    sort_order: int = Form(default=100),
+    badge_label: str = Form(default=''),
+    is_enabled: str = Form(default=''),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/upsells/traffic/'
+    payload, err = _parse_topup_form(
+        code=code, title=title, extra_traffic_gb=extra_traffic_gb,
+        amount=amount, is_enabled=bool(is_enabled), sort_order=sort_order,
+        badge_label=badge_label,
+    )
+    if err:
+        return _redirect_with_message(redirect, error=err)
+    async with sessionmaker.begin() as session:
+        repo = TrafficTopupOptionRepository(session)
+        if await repo.get_by_code(payload['code']) is not None:
+            return _redirect_with_message(redirect, error=f'Код «{payload["code"]}» уже используется')
+        try:
+            row = await repo.create(**payload)
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.traffic_topup_option_created,
+            actor_type=AuditActorType.admin, actor_tg_id=None,
+            entity_type='traffic_topup_option', entity_id=str(row.id),
+            details={'code': row.code, 'amount': str(row.amount), 'extra_traffic_gb': row.extra_traffic_gb},
+        )
+    return _redirect_with_message(redirect, success=f'Опция «{payload["code"]}» создана')
+
+
+@router.post('/admin/upsells/traffic/{option_id}', dependencies=[Depends(require_web_admin)])
+async def admin_upsells_traffic_update(
+    request: Request,
+    option_id: int,
+    title: str = Form(...),
+    extra_traffic_gb: int = Form(...),
+    amount: str = Form(...),
+    sort_order: int = Form(default=100),
+    badge_label: str = Form(default=''),
+    is_enabled: str = Form(default=''),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/upsells/traffic/'
+    payload, err = _parse_topup_form(
+        code=None, title=title, extra_traffic_gb=extra_traffic_gb,
+        amount=amount, is_enabled=bool(is_enabled), sort_order=sort_order,
+        badge_label=badge_label,
+    )
+    if err:
+        return _redirect_with_message(redirect, error=err)
+    async with sessionmaker.begin() as session:
+        repo = TrafficTopupOptionRepository(session)
+        row = await repo.get_by_id(option_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='Опция не найдена')
+        try:
+            await repo.update(row, **payload)
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.traffic_topup_option_updated,
+            actor_type=AuditActorType.admin, actor_tg_id=None,
+            entity_type='traffic_topup_option', entity_id=str(row.id),
+            details={'code': row.code, 'amount': str(row.amount), 'extra_traffic_gb': row.extra_traffic_gb, 'is_enabled': row.is_enabled},
+        )
+    return _redirect_with_message(redirect, success=f'Опция «{row.code}» обновлена')
+
+
+@router.post('/admin/upsells/traffic/{option_id}/toggle', dependencies=[Depends(require_web_admin)])
+async def admin_upsells_traffic_toggle(request: Request, option_id: int):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/upsells/traffic/'
+    async with sessionmaker.begin() as session:
+        repo = TrafficTopupOptionRepository(session)
+        row = await repo.get_by_id(option_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='Опция не найдена')
+        new_state = not row.is_enabled
+        await repo.update(row, is_enabled=new_state)
+        await AuditLogRepository(session).create(
+            action=AuditAction.traffic_topup_option_toggled,
+            actor_type=AuditActorType.admin, actor_tg_id=None,
+            entity_type='traffic_topup_option', entity_id=str(row.id),
+            details={'code': row.code, 'is_enabled': new_state},
+        )
+    label = 'включена' if new_state else 'выключена'
+    return _redirect_with_message(redirect, success=f'Опция «{row.code}» {label}')
+
+
+@router.post('/admin/upsells/traffic/{option_id}/delete', dependencies=[Depends(require_web_admin)])
+async def admin_upsells_traffic_delete(request: Request, option_id: int):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/upsells/traffic/'
+    async with sessionmaker.begin() as session:
+        repo = TrafficTopupOptionRepository(session)
+        row = await repo.get_by_id(option_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='Опция не найдена')
+        code = row.code
+        await repo.delete(row)
+        await AuditLogRepository(session).create(
+            action=AuditAction.traffic_topup_option_deleted,
+            actor_type=AuditActorType.admin, actor_tg_id=None,
+            entity_type='traffic_topup_option', entity_id=str(option_id),
+            details={'code': code},
+        )
+    return _redirect_with_message(redirect, success=f'Опция «{code}» удалена')
 
 
 @router.get('/admin/tickets/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
