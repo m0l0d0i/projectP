@@ -152,6 +152,7 @@ class AuditAction(str, enum.Enum):
     routing_profile_updated = 'routing_profile_updated'
     notification_rule_toggled = 'notification_rule_toggled'
     notification_rule_updated = 'notification_rule_updated'
+    notification_rule_test_sent = 'notification_rule_test_sent'
 
 
 class AuditActorType(str, enum.Enum):

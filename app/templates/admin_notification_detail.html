@@ -30,6 +30,20 @@
     <div class="flex flex-wrap gap-3">
       <form
         method="post"
+        action="/admin/notifications/{{ rule.code }}/test-send"
+        data-confirm="Отправить тестовое сообщение по правилу «{{ rule.code }}» первому admin_ids? Cooldown/snooze/disabled будут проигнорированы (force=True)."
+      >
+        <button
+          type="submit"
+          title="Отправить тест на первый admin_ids через NotificationDispatcher"
+          class="inline-flex items-center rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 hover:border-cyan-400 hover:text-cyan-100"
+        >
+          📨 Отправить тест
+        </button>
+      </form>
+
+      <form
+        method="post"
         action="/admin/notifications/{{ rule.code }}/toggle"
         data-confirm="{% if rule.is_enabled %}Выключить правило «{{ rule.code }}»? Уведомления этого сценария перестанут отправляться.{% else %}Включить правило «{{ rule.code }}»? Уведомления начнут отправляться согласно расписанию job'а.{% endif %}"
       >
@@ -337,7 +351,10 @@
       </div>
     </dl>
     <p class="mt-4 text-xs text-slate-500">
-      Test-send (отправка предпросмотра на свой tg_id) появится в следующем коммите.
+      Кнопка «Отправить тест» в шапке отправляет уведомление через
+      <span class="text-slate-200">NotificationDispatcher.dispatch(force=True)</span>
+      первому admin_ids — обходит is_enabled/snooze/cooldown.
+      Сообщение придёт после ближайшего цикла outbox-воркера.
     </p>
   </div>
 </div>

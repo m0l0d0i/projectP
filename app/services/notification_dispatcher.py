@@ -71,19 +71,27 @@ class NotificationDispatcher:
         default_parse_mode: str | None = None,
         context: dict[str, Any] | None = None,
         correlation_key: str | None = None,
+        force: bool = False,
     ) -> bool:
         """Отправить уведомление через outbox с учётом правила и cooldown'а.
 
         Возвращает True, если задача поставлена в outbox; False, если правило
         отключено, cooldown активен или произошла ошибка рендера.
+
+        `force=True` — обойти проверки `is_enabled`, snooze и cooldown
+        (используется admin test-send из web-admin).
         """
         rule = await NotificationRuleRepository(session).get_by_code(code)
-        if rule is not None and not rule.is_enabled:
+        if rule is not None and not rule.is_enabled and not force:
             logger.debug('Notification rule %s is disabled, skipping', code)
             NOTIFICATIONS_BLOCKED.labels(code=code, reason='disabled').inc()
             return False
 
-        if self._redis is not None and await self._is_snoozed(user_id=user_id, code=code):
+        if (
+            self._redis is not None
+            and not force
+            and await self._is_snoozed(user_id=user_id, code=code)
+        ):
             logger.debug(
                 'Notification snoozed for user_id=%s code=%s; skipping',
                 user_id, code,
@@ -114,7 +122,7 @@ class NotificationDispatcher:
                 if rendered_kb is not None:
                     reply_markup = rendered_kb
 
-            if rule.cooldown_seconds > 0 and self._redis is not None:
+            if rule.cooldown_seconds > 0 and self._redis is not None and not force:
                 acquired = await self._acquire_cooldown(
                     user_id=user_id, code=code, ttl_seconds=rule.cooldown_seconds,
                 )

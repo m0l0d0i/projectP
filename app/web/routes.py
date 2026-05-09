@@ -3610,6 +3610,113 @@ async def admin_notification_toggle(request: Request, code: str):
     )
 
 
+def _resolve_admin_tg_id_for_test(app_settings_view, settings: Settings) -> int | None:
+    """Первый tg_id из app_settings.admin_ids; fallback — settings.admin_ids."""
+    candidates: list[int] = []
+    raw = getattr(app_settings_view, 'admin_ids', None) or []
+    for value in raw:
+        try:
+            candidates.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if candidates:
+        return candidates[0]
+    for value in settings.admin_ids or []:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+@router.post(
+    '/admin/notifications/{code}/test-send',
+    dependencies=[Depends(require_web_admin)],
+)
+async def admin_notification_test_send(request: Request, code: str):
+    sessionmaker = request.app.state.sessionmaker
+    settings = request.app.state.settings
+    redirect_path = f'/admin/notifications/{code}'
+
+    async with sessionmaker() as session:
+        app_settings = _app_settings_view(
+            await AppSettingsRepository(session).get(), settings,
+        )
+        rule = await NotificationRuleRepository(session).get_by_code(code)
+
+    if rule is None:
+        return _redirect_with_message(
+            '/admin/notifications/',
+            error=f'Правило с кодом «{code}» не найдено',
+        )
+
+    target_tg_id = _resolve_admin_tg_id_for_test(app_settings, settings)
+    if target_tg_id is None:
+        return _redirect_with_message(
+            redirect_path,
+            error='Не задан admin_ids — некому отправить тестовое сообщение',
+        )
+
+    redis_client = (
+        getattr(request.app.state, 'redis', None)
+        or getattr(request.app.state, 'redis_client', None)
+    )
+    redis_prefix = getattr(settings, 'redis_prefix', 'vpn_bot')
+
+    from app.services.notification_dispatcher import NotificationDispatcher as _Dispatcher
+    dispatcher = _Dispatcher(redis_client=redis_client, redis_prefix=redis_prefix)
+
+    correlation_key = f'admin-test:{code}:{int(time.time() * 1000)}'
+
+    async with sessionmaker.begin() as session:
+        try:
+            sent = await dispatcher.dispatch(
+                session=session,
+                code=code,
+                chat_id=target_tg_id,
+                user_id=target_tg_id,
+                default_text=rule.template_text,
+                default_reply_markup=None,
+                default_parse_mode=None,
+                context=_build_preview_context(),
+                correlation_key=correlation_key,
+                force=True,
+            )
+        except Exception:
+            logger.exception('Test-send failed for notification rule %s', code)
+            return _redirect_with_message(
+                redirect_path,
+                error='Не удалось поставить тест в outbox — смотрите логи сервиса',
+            )
+
+        if not sent:
+            return _redirect_with_message(
+                redirect_path,
+                error='Dispatcher отказал в отправке (см. метрики/логи)',
+            )
+
+        await AuditLogRepository(session).create(
+            action=AuditAction.notification_rule_test_sent,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            entity_type='notification_rule',
+            entity_id=str(rule.id),
+            details={
+                'code': rule.code,
+                'target_tg_id': target_tg_id,
+                'correlation_key': correlation_key,
+            },
+        )
+
+    return _redirect_with_message(
+        redirect_path,
+        success=(
+            f'Тест поставлен в outbox для tg_id={target_tg_id}. '
+            'Сообщение придёт после ближайшего цикла outbox-воркера.'
+        ),
+    )
+
+
 @router.post('/admin/notifications/{code}', dependencies=[Depends(require_web_admin)])
 async def admin_notification_update(
     request: Request,
