@@ -110,6 +110,25 @@ class TariffDeviceMode(str, enum.Enum):
     unlimited = 'unlimited'
 
 
+class TariffVisibility(str, enum.Enum):
+    """FEA-ADMIN-TARIFF-PLUS: видимость тарифа для пользователя.
+
+    `public` — обычный публичный тариф (как все существующие после
+        миграции — server_default='public').
+    `code_only` — виден только если у пользователя есть применённый
+        промокод с `unlocks_tariff_id == tariff.id` (или ручной unlock
+        в `User.unlocked_tariff_ids`).
+    `segment_only` — виден только при совпадении с DSL `segment_filter_json`
+        (поддерживаемые ключи в `app/services/tariff_visibility.py`).
+    `private_link` — виден ТОЛЬКО при unlocked-flag (через deep-link
+        `start=tariff_<private_token>` или ручную выдачу из админки).
+    """
+    public = 'public'
+    code_only = 'code_only'
+    segment_only = 'segment_only'
+    private_link = 'private_link'
+
+
 class NodeHealthStatus(str, enum.Enum):
     unknown = 'unknown'
     healthy = 'healthy'
@@ -185,6 +204,8 @@ class AuditAction(str, enum.Enum):
     subscription_enabled = 'subscription_enabled'
     subscription_tariff_changed = 'subscription_tariff_changed'
     subscription_url_reissued = 'subscription_url_reissued'
+    tariff_visibility_updated = 'tariff_visibility_updated'
+    tariff_unlock_granted = 'tariff_unlock_granted'
 
 
 class AuditActorType(str, enum.Enum):
@@ -276,6 +297,13 @@ class User(TimestampMixin, Base):
     # отображаются в карточке пользователя и могут использоваться сегментами.
     admin_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=sa_text("'[]'::json")
+    )
+    # FEA-ADMIN-TARIFF-PLUS: список ID тарифов, разблокированных для этого
+    # пользователя (через deep-link `start=tariff_<private_token>` или
+    # промокод с `unlocks_tariff_id`). Используется в visibility-резолве
+    # на стороне бота.
+    unlocked_tariff_ids: Mapped[list[int]] = mapped_column(
         JSON, nullable=False, default=list, server_default=sa_text("'[]'::json")
     )
 
@@ -459,6 +487,15 @@ class TariffPlan(TimestampMixin, Base):
             'NOT (is_archived AND is_active)',
             name='ck_tariff_plan_archived_not_active',
         ),
+        CheckConstraint(
+            'max_active_subscriptions IS NULL OR max_active_subscriptions >= 1',
+            name='ck_tariff_plans_max_active_subs_positive',
+        ),
+        CheckConstraint(
+            'available_from IS NULL OR available_to IS NULL OR available_from <= available_to',
+            name='ck_tariff_plans_available_window_valid',
+        ),
+        UniqueConstraint('private_token', name='uq_tariff_plans_private_token'),
         Index('ix_tariff_plan_public_active_sort', 'is_public', 'is_active', 'sort_order', 'id'),
         Index('ix_tariff_plan_archived_sort', 'is_archived', 'sort_order', 'id'),
         Index('ix_tariff_plan_pricing_mode', 'pricing_mode', 'id'),
@@ -556,6 +593,23 @@ class TariffPlan(TimestampMixin, Base):
         server_default=sa_text('1'),
     )
     online_limit_unlimited: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # FEA-ADMIN-TARIFF-PLUS: visibility + окна + сегменты + private-link.
+    visibility: Mapped[TariffVisibility] = mapped_column(
+        Enum(TariffVisibility, name='tariff_visibility'),
+        nullable=False,
+        default=TariffVisibility.public,
+        server_default=sa_text("'public'"),
+    )
+    available_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    available_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    segment_filter_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    private_token: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    accent_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    is_recommended: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa_text('false')
+    )
+    max_active_subscriptions: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     period_options: Mapped[list['TariffPeriodOption']] = relationship(
         back_populates='tariff_plan',
@@ -688,6 +742,13 @@ class PromoCode(TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_text('true'), nullable=False, index=True)
     created_by_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # FEA-ADMIN-TARIFF-PLUS: при погашении промокода тариф добавляется в
+    # `User.unlocked_tariff_ids` — это разблокирует `code_only` тарифы и
+    # даёт доступ к `private_link` без отдельного deep-link'а.
+    unlocks_tariff_id: Mapped[int | None] = mapped_column(
+        ForeignKey('tariff_plans.id', ondelete='SET NULL'),
+        nullable=True,
+    )
 
     redemptions: Mapped[list['PromoRedemption']] = relationship(
         back_populates='promo',
