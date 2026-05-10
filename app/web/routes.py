@@ -82,9 +82,17 @@ from app.utils.runtime_settings import (
     effective_list_from_row,
     effective_optional_int_from_row,
 )
+from app.web.auth import (
+    require_any,
+    require_finance,
+    require_finance_or_support,
+    require_role,
+    require_superadmin,
+    require_support,
+    web_admin_security,
+)
 
 router = APIRouter()
-web_admin_security = HTTPBasic()
 logger = logging.getLogger(__name__)
 
 
@@ -2382,7 +2390,7 @@ async def _delete_tariff_via_repo(repo: TariffRepository, plan) -> bool:
 async def admin_index_redirect_noslash() -> RedirectResponse:
     return RedirectResponse(url='/admin/system/', status_code=307)
 
-@router.get('/admin/system/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/system/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_system(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -2442,7 +2450,7 @@ async def admin_system(request: Request):
     )
 
 
-@router.get('/admin/search', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/search', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_search(request: Request, q: str | None = Query(default=None)):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -2514,7 +2522,7 @@ async def admin_search(request: Request, q: str | None = Query(default=None)):
     )
 
 
-@router.get('/admin/users/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/users/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_users(request: Request, q: str | None = Query(default=None), page: int = Query(default=1, ge=1)):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -2563,7 +2571,7 @@ async def admin_users(request: Request, q: str | None = Query(default=None), pag
     )
 
 
-@router.get('/admin/users/{user_id}', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/users/{user_id}', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_user_detail(request: Request, user_id: int):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -2637,7 +2645,7 @@ async def admin_user_detail(request: Request, user_id: int):
     )
 
 
-@router.post('/admin/users/{user_id}/balance', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/users/{user_id}/balance', dependencies=[Depends(require_finance)])
 async def admin_user_balance_update(
     request: Request,
     user_id: int,
@@ -2690,7 +2698,7 @@ async def admin_user_balance_update(
     return _redirect_with_message(f'/admin/users/{user_id}', success='Баланс пользователя обновлён')
 
 
-@router.get('/admin/people/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/people/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_people(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -2715,7 +2723,7 @@ async def admin_people(request: Request):
     )
 
 
-@router.post('/admin/people/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/people/', dependencies=[Depends(require_superadmin)])
 async def admin_people_update(
     request: Request,
     admin_ids: str | None = Form(default=None),
@@ -2758,7 +2766,7 @@ async def admin_people_update(
     return _redirect_with_message('/admin/people/', success='Настройки людей и уведомлений обновлены')
 
 
-@router.post('/admin/people/test-support-chat', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/people/test-support-chat', dependencies=[Depends(require_superadmin)])
 async def admin_people_test_support_chat(request: Request):
     sessionmaker = request.app.state.sessionmaker
     settings = request.app.state.settings
@@ -2800,7 +2808,7 @@ async def admin_people_test_support_chat(request: Request):
             return _redirect_with_message('/admin/people/', error=f'Не удалось отправить тестовое сообщение: {exc}')
 
 
-@router.get('/admin/pricing/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/pricing/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_pricing(
     request: Request,
     status: str = Query(default='all'),
@@ -2859,7 +2867,7 @@ async def admin_pricing(
     )
 
 
-@router.post('/admin/pricing/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/pricing/', dependencies=[Depends(require_finance)])
 async def admin_pricing_update(
     request: Request,
     action: str | None = Form(default=None),
@@ -3123,7 +3131,7 @@ async def admin_pricing_update(
 
     return _redirect_with_message('/admin/pricing/', error='Неизвестное действие')
 
-@router.get('/admin/trial/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/trial/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_trial(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -3151,7 +3159,7 @@ async def admin_trial(request: Request):
     )
 
 
-@router.post('/admin/trial/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/trial/', dependencies=[Depends(require_superadmin)])
 async def admin_trial_update(
     request: Request,
     trial_duration_days: int | None = Form(default=None),
@@ -3188,7 +3196,7 @@ async def admin_trial_update(
 
     return _redirect_with_message('/admin/trial/', success='Trial-настройки обновлены')
 
-@router.get('/admin/antispam/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/antispam/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_antispam(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -3211,7 +3219,7 @@ async def admin_antispam(request: Request):
     )
 
 
-@router.post('/admin/antispam/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/antispam/', dependencies=[Depends(require_superadmin)])
 async def admin_antispam_update(
     request: Request,
     anti_spam_enabled: bool = Form(default=False),
@@ -3268,7 +3276,7 @@ async def admin_antispam_update(
 
     return _redirect_with_message('/admin/antispam/', success='Anti-spam настройки обновлены')
 
-@router.get('/admin/rules/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/rules/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_rules(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -3291,7 +3299,7 @@ async def admin_rules(request: Request):
     )
 
 
-@router.post('/admin/rules/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/rules/', dependencies=[Depends(require_superadmin)])
 async def admin_rules_update(
     request: Request,
     rules_service_url: str | None = Form(default=None),
@@ -3526,7 +3534,7 @@ def _notification_rule_view(
     )
 
 
-@router.get('/admin/notifications/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/notifications/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_notifications(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -3561,7 +3569,7 @@ async def admin_notifications(request: Request):
 @router.get(
     '/admin/notifications/{code}',
     response_class=HTMLResponse,
-    dependencies=[Depends(require_web_admin)],
+    dependencies=[Depends(require_any)],
 )
 async def admin_notification_detail(request: Request, code: str):
     templates = request.app.state.templates
@@ -3594,7 +3602,7 @@ async def admin_notification_detail(request: Request, code: str):
 
 @router.post(
     '/admin/notifications/{code}/toggle',
-    dependencies=[Depends(require_web_admin)],
+    dependencies=[Depends(require_support)],
 )
 async def admin_notification_toggle(request: Request, code: str):
     sessionmaker = request.app.state.sessionmaker
@@ -3648,7 +3656,7 @@ def _resolve_admin_tg_id_for_test(app_settings_view, settings: Settings) -> int 
 
 @router.post(
     '/admin/notifications/{code}/test-send',
-    dependencies=[Depends(require_web_admin)],
+    dependencies=[Depends(require_support)],
 )
 async def admin_notification_test_send(request: Request, code: str):
     sessionmaker = request.app.state.sessionmaker
@@ -3734,7 +3742,7 @@ async def admin_notification_test_send(request: Request, code: str):
     )
 
 
-@router.post('/admin/notifications/{code}', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/notifications/{code}', dependencies=[Depends(require_support)])
 async def admin_notification_update(
     request: Request,
     code: str,
@@ -3862,7 +3870,7 @@ def _topup_option_view(row, *, is_best: bool = False):
     )
 
 
-@router.get('/admin/upsells/traffic/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/upsells/traffic/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_upsells_traffic(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -3934,7 +3942,7 @@ def _parse_topup_form(
     return payload, None
 
 
-@router.post('/admin/upsells/traffic/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/upsells/traffic/', dependencies=[Depends(require_finance)])
 async def admin_upsells_traffic_create(
     request: Request,
     code: str = Form(...),
@@ -3971,7 +3979,7 @@ async def admin_upsells_traffic_create(
     return _redirect_with_message(redirect, success=f'Опция «{payload["code"]}» создана')
 
 
-@router.post('/admin/upsells/traffic/{option_id}', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/upsells/traffic/{option_id}', dependencies=[Depends(require_finance)])
 async def admin_upsells_traffic_update(
     request: Request,
     option_id: int,
@@ -4009,7 +4017,7 @@ async def admin_upsells_traffic_update(
     return _redirect_with_message(redirect, success=f'Опция «{row.code}» обновлена')
 
 
-@router.post('/admin/upsells/traffic/{option_id}/toggle', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/upsells/traffic/{option_id}/toggle', dependencies=[Depends(require_finance)])
 async def admin_upsells_traffic_toggle(request: Request, option_id: int):
     sessionmaker = request.app.state.sessionmaker
     redirect = '/admin/upsells/traffic/'
@@ -4030,7 +4038,7 @@ async def admin_upsells_traffic_toggle(request: Request, option_id: int):
     return _redirect_with_message(redirect, success=f'Опция «{row.code}» {label}')
 
 
-@router.post('/admin/upsells/traffic/{option_id}/delete', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/upsells/traffic/{option_id}/delete', dependencies=[Depends(require_finance)])
 async def admin_upsells_traffic_delete(request: Request, option_id: int):
     sessionmaker = request.app.state.sessionmaker
     redirect = '/admin/upsells/traffic/'
@@ -4079,7 +4087,7 @@ def _device_topup_preview_examples(
     return examples
 
 
-@router.get('/admin/upsells/devices/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/upsells/devices/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_upsells_devices(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -4109,7 +4117,7 @@ async def admin_upsells_devices(request: Request):
     )
 
 
-@router.post('/admin/upsells/devices/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/upsells/devices/', dependencies=[Depends(require_finance)])
 async def admin_upsells_devices_update(
     request: Request,
     price_mode: str = Form(...),
@@ -4149,7 +4157,7 @@ async def admin_upsells_devices_update(
     return _redirect_with_message(redirect, success='Настройки апсейла устройств сохранены')
 
 
-@router.get('/admin/tickets/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/tickets/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_tickets(
     request: Request,
     q: str | None = Query(default=None),
@@ -4217,7 +4225,7 @@ async def admin_tickets(
     )
 
 
-@router.get('/admin/tickets/{ticket_id}', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/tickets/{ticket_id}', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_ticket_detail(request: Request, ticket_id: int):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -4263,7 +4271,7 @@ async def admin_ticket_detail(request: Request, ticket_id: int):
     )
 
 
-@router.post('/admin/tickets/{ticket_id}/close', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/tickets/{ticket_id}/close', dependencies=[Depends(require_support)])
 async def admin_ticket_close(
     request: Request,
     ticket_id: int,
@@ -4314,7 +4322,7 @@ async def admin_ticket_close(
     return _redirect_with_message(f'/admin/tickets/{ticket_id}', success='Тикет закрыт')
 
 
-@router.get('/admin/promocodes/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/promocodes/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_promocodes(
     request: Request,
     page: int = Query(default=1, ge=1),
@@ -4399,7 +4407,7 @@ async def admin_promocodes(
     )
 
 
-@router.post('/admin/promocodes/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/promocodes/', dependencies=[Depends(require_finance)])
 async def admin_promocodes_update(
     request: Request,
     action: str | None = Form(default=None),
@@ -4527,7 +4535,7 @@ async def admin_promocodes_update(
     return _redirect_with_message('/admin/promocodes/', error='Неизвестное действие')
 
 
-@router.get('/admin/broadcasts/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/broadcasts/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_broadcasts(
     request: Request,
     page: int = Query(default=1, ge=1),
@@ -4600,7 +4608,7 @@ async def admin_broadcasts(
     )
 
 
-@router.post('/admin/broadcasts/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/broadcasts/', dependencies=[Depends(require_support)])
 async def admin_broadcasts_upsert(
     request: Request,
     action: str = Form(default='create'),
@@ -4698,7 +4706,7 @@ async def admin_broadcasts_upsert(
     return _redirect_with_message('/admin/broadcasts/', error='Неизвестное действие для рассылки')
 
 
-@router.post('/admin/broadcasts/test', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/broadcasts/test', dependencies=[Depends(require_support)])
 async def admin_broadcasts_test_send(
     request: Request,
     text_value: str | None = Form(default=None),
@@ -4749,7 +4757,7 @@ async def admin_broadcasts_test_send(
 
     return _redirect_with_message('/admin/broadcasts/', success='Тестовое сообщение отправлено')
 
-@router.get('/admin/links/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/links/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_app_links(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -4780,7 +4788,7 @@ async def admin_app_links(request: Request):
     )
 
 
-@router.post('/admin/links/{link_id}', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/links/{link_id}', dependencies=[Depends(require_superadmin)])
 async def admin_app_links_update(
     request: Request,
     link_id: int,
@@ -4838,7 +4846,7 @@ async def admin_app_links_update(
 
 
 
-@router.get('/admin/marzban-page/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/marzban-page/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_marzban_page(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -4957,7 +4965,7 @@ async def admin_marzban_page(request: Request):
     )
 
 
-@router.post('/admin/marzban-page/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/marzban-page/', dependencies=[Depends(require_superadmin)])
 async def admin_marzban_page_update(
     request: Request,
     brand_name: str | None = Form(default=None),
@@ -5034,7 +5042,7 @@ async def admin_marzban_page_update(
     return _redirect_with_message('/admin/marzban-page/', success='Настройки страницы подписки обновлены')
 
 
-@router.post('/admin/marzban-page/env/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/marzban-page/env/', dependencies=[Depends(require_superadmin)])
 async def admin_marzban_page_env_update(request: Request):
     settings = request.app.state.settings
     sessionmaker = request.app.state.sessionmaker
@@ -5073,7 +5081,7 @@ async def admin_marzban_page_env_update(request: Request):
     )
 
 
-@router.post('/admin/marzban-page/apply/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/marzban-page/apply/', dependencies=[Depends(require_superadmin)])
 async def admin_marzban_page_apply(request: Request):
     settings = request.app.state.settings
     sessionmaker = request.app.state.sessionmaker
@@ -5246,7 +5254,7 @@ _MARZBAN_PREVIEW_CSP = (
 )
 
 
-@router.get('/admin/marzban-page/preview', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/marzban-page/preview', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_marzban_page_preview(request: Request):
     sessionmaker = request.app.state.sessionmaker
     settings = request.app.state.settings
@@ -5282,7 +5290,7 @@ async def admin_marzban_page_preview(request: Request):
         return HTMLResponse(body, status_code=500)
 
 
-@router.get('/admin/marzban-ops/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/marzban-ops/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_marzban_ops(request: Request):
     templates = request.app.state.templates
     settings = request.app.state.settings
@@ -5316,7 +5324,7 @@ async def admin_marzban_ops(request: Request):
     )
 
 
-@router.post('/admin/marzban-ops/geodata/update', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/marzban-ops/geodata/update', dependencies=[Depends(require_superadmin)])
 async def admin_marzban_geodata_update(
     request: Request,
     target: str | None = Form(default='all'),
@@ -5346,7 +5354,7 @@ async def admin_marzban_geodata_update(
         await updater.close()
 
 
-@router.get('/admin/nodes/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/nodes/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_nodes(request: Request):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -5387,7 +5395,7 @@ async def admin_nodes(request: Request):
     )
 
 
-@router.post('/admin/nodes/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/nodes/', dependencies=[Depends(require_superadmin)])
 async def admin_nodes_update(
     request: Request,
     action: str | None = Form(default=None),
@@ -5540,7 +5548,7 @@ async def admin_nodes_update(
     return _redirect_with_message('/admin/nodes/', error='Неизвестное действие')
 
 
-@router.get('/admin/routing-profiles/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/routing-profiles/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_routing_profiles(
     request: Request,
     edit_id: int | None = Query(default=None),
@@ -5594,7 +5602,7 @@ async def admin_routing_profiles(
     )
 
 
-@router.post('/admin/routing-profiles/', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/routing-profiles/', dependencies=[Depends(require_superadmin)])
 async def admin_routing_profiles_update(
     request: Request,
     action: str | None = Form(default=None),
@@ -5721,7 +5729,7 @@ async def admin_routing_profiles_update(
 
     return _redirect_with_message('/admin/routing-profiles/', error='Неизвестное действие')
 
-@router.get('/admin/invoices/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/invoices/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_invoices(
     request: Request,
     page: int = Query(default=1, ge=1),
@@ -5776,7 +5784,7 @@ async def admin_invoices(
     )
 
 
-@router.get('/admin/invoices/{invoice_id}', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+@router.get('/admin/invoices/{invoice_id}', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_invoice_detail(request: Request, invoice_id: int):
     sessionmaker = request.app.state.sessionmaker
     settings = request.app.state.settings
@@ -5813,7 +5821,7 @@ async def admin_invoice_detail(request: Request, invoice_id: int):
     )
 
 
-@router.post('/admin/invoices/{invoice_id}/refresh', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/invoices/{invoice_id}/refresh', dependencies=[Depends(require_finance)])
 async def admin_invoice_refresh(request: Request, invoice_id: int, return_to: str | None = Form(default=None)):
     sessionmaker = request.app.state.sessionmaker
     settings = request.app.state.settings
@@ -5853,7 +5861,7 @@ async def admin_invoice_refresh(request: Request, invoice_id: int, return_to: st
     return _redirect_with_message(target, success=f'Проверка завершена: {result.status_text}')
 
 
-@router.post('/admin/invoices/{invoice_id}/approve', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/invoices/{invoice_id}/approve', dependencies=[Depends(require_finance)])
 async def admin_invoice_approve(request: Request, invoice_id: int, return_to: str | None = Form(default=None)):
     sessionmaker = request.app.state.sessionmaker
     settings = request.app.state.settings
@@ -5875,7 +5883,7 @@ async def admin_invoice_approve(request: Request, invoice_id: int, return_to: st
     return _redirect_with_message(target, success=f'Счет обработан: {result.status_text}')
 
 
-@router.post('/admin/invoices/{invoice_id}/cancel', dependencies=[Depends(require_web_admin)])
+@router.post('/admin/invoices/{invoice_id}/cancel', dependencies=[Depends(require_finance)])
 async def admin_invoice_cancel(request: Request, invoice_id: int, return_to: str | None = Form(default=None)):
     sessionmaker = request.app.state.sessionmaker
     settings = request.app.state.settings
@@ -5897,7 +5905,7 @@ async def admin_invoice_cancel(request: Request, invoice_id: int, return_to: str
     return _redirect_with_message(target, success='Счет отменён')
 
 
-@router.get('/admin/export/{entity}.csv', dependencies=[Depends(require_web_admin)])
+@router.get('/admin/export/{entity}.csv', dependencies=[Depends(require_any)])
 async def admin_export_csv(
     request: Request,
     entity: str,

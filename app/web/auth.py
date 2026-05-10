@@ -21,12 +21,15 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.db.models import WebAdminRole, WebAdminUser
-from app.db.repositories import WebAdminUserRepository
+from app.db.models import AuditAction, AuditActorType, WebAdminRole, WebAdminUser
+from app.db.repositories import AuditLogRepository, WebAdminUserRepository
 from app.services.web_admin_auth import (
     hash_password,
     verify_password,
 )
+
+
+_MUTATING_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +164,37 @@ def require_role(*allowed_roles: WebAdminRole):
                 request.url.path,
             )
             raise HTTPException(status_code=403, detail='Недостаточно прав для этого действия')
+
+        # Compliance: каждое mutation-действие через RBAC-gate пишется
+        # в audit_logs (action=web_admin_action) с username/role/path/
+        # method. GET не логируем — слишком шумно (журнал распухнет).
+        # Отдельная транзакция через sessionmaker.begin() — иначе
+        # хендлер, использующий свой `async with sessionmaker.begin()`,
+        # увидит конфликт: nested begin() запрещён в asyncpg.
+        if request.method.upper() in _MUTATING_METHODS:
+            try:
+                async with sessionmaker.begin() as session:
+                    await AuditLogRepository(session).create(
+                        action=AuditAction.web_admin_action,
+                        actor_type=AuditActorType.admin,
+                        actor_tg_id=None,
+                        actor_username=principal.username,
+                        entity_type='web_admin_route',
+                        entity_id=request.url.path,
+                        details={
+                            'method': request.method,
+                            'role': principal.role.value,
+                            'is_legacy': principal.is_legacy,
+                            'client_ip': client_ip,
+                        },
+                    )
+            except Exception:
+                # Не валим запрос из-за журнала — просто warning.
+                logger.exception(
+                    'Failed to write web_admin_action audit log for %s %s',
+                    request.method,
+                    request.url.path,
+                )
 
         return principal
 
