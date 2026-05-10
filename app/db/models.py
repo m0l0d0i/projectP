@@ -179,6 +179,10 @@ class AuditAction(str, enum.Enum):
     user_trial_reset = 'user_trial_reset'
     user_admin_dm_sent = 'user_admin_dm_sent'
     user_force_subscription_disabled = 'user_force_subscription_disabled'
+    subscription_extended = 'subscription_extended'
+    subscription_traffic_reset = 'subscription_traffic_reset'
+    subscription_disabled = 'subscription_disabled'
+    subscription_enabled = 'subscription_enabled'
 
 
 class AuditActorType(str, enum.Enum):

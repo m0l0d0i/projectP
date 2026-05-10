@@ -6181,6 +6181,335 @@ async def admin_subscriptions(
     )
 
 
+@router.get('/admin/subscriptions/{subscription_id}', response_class=HTMLResponse, dependencies=[Depends(require_any)])
+async def admin_subscription_detail(request: Request, subscription_id: int):
+    """Карточка одной подписки (FEA-ADMIN-SUB-CRM #2).
+
+    Локальное состояние из БД + (best-effort) snapshot из Marzban с
+    expire/data_limit/used/status. Marzban-вызов изолирован: при сбое
+    показываем локальный state и предупреждение (страница остаётся
+    рабочей, action-кнопки активны)."""
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+    templates = request.app.state.templates
+
+    async with sessionmaker() as session:
+        sub = await SubscriptionRepository(session).get_by_id(subscription_id)
+        if sub is None:
+            raise HTTPException(status_code=404, detail='Subscription not found')
+        user = await UserRepository(session).get_by_id(sub.user_id)
+        tariffs = await TariffRepository(session).list_active()
+        local_view = _subscription_row_view(sub, user)
+        marzban_username = sub.marzban_username
+        sub_url = sub.subscription_url
+
+    marzban_snapshot: dict[str, Any] | None = None
+    marzban_error: str | None = None
+    if settings.marzban_enabled and marzban_username:
+        client = MarzbanClient(settings)
+        try:
+            remote = await client.get_user(marzban_username)
+            marzban_snapshot = {
+                'status': getattr(remote, 'status', None) or '—',
+                'expire_label': format_dt(getattr(remote, 'expire_datetime', None)) or '—',
+                'data_limit_gb': bytes_to_gb(getattr(remote, 'data_limit', None) or 0) if (getattr(remote, 'data_limit', None) or 0) else '♾️',
+                'used_gb': bytes_to_gb(getattr(remote, 'used_traffic', None) or 0),
+                'subscription_url': getattr(remote, 'subscription_url', None) or sub_url,
+                'note': getattr(remote, 'raw', {}).get('note') if hasattr(remote, 'raw') else None,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Marzban snapshot failed for sub_id=%s: %s', subscription_id, exc)
+            marzban_error = str(exc)
+        finally:
+            with suppress(Exception):
+                await client.close()
+
+    return templates.TemplateResponse(
+        request,
+        'admin_subscription_detail.html',
+        {
+            'current_page': 'subscriptions',
+            'sub': local_view,
+            'sub_url': sub_url,
+            'marzban_snapshot': marzban_snapshot,
+            'marzban_error': marzban_error,
+            'marzban_enabled': settings.marzban_enabled,
+            'tariff_options': [
+                {'code': t.code, 'title': t.title}
+                for t in tariffs if getattr(t, 'code', None)
+            ],
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+async def _load_sub_or_redirect(sessionmaker, subscription_id: int):
+    """Загрузить подписку и user/marzban_username для action-роутов.
+
+    Возвращает (sub_dict, redirect_response_on_error). При успехе
+    redirect_response_on_error = None.
+    """
+    async with sessionmaker() as session:
+        sub = await SubscriptionRepository(session).get_by_id(subscription_id)
+        if sub is None:
+            return None, _redirect_with_message(
+                '/admin/subscriptions/', error='Подписка не найдена'
+            )
+        return (
+            {
+                'id': sub.id,
+                'user_id': sub.user_id,
+                'service_id': sub.service_id,
+                'marzban_username': sub.marzban_username,
+                'expire_date': sub.expire_date,
+                'data_limit_bytes': sub.data_limit_bytes,
+                'monthly_traffic_bytes': sub.monthly_traffic_bytes,
+                'online_limit': sub.online_limit,
+                'is_active': sub.is_active,
+                'current_tariff_code': sub.current_tariff_code,
+            },
+            None,
+        )
+
+
+@router.post('/admin/subscriptions/{subscription_id}/extend', dependencies=[Depends(require_finance_or_support)])
+async def admin_subscription_extend(
+    request: Request,
+    subscription_id: int,
+    months: int = Form(...),
+    principal: WebAdminPrincipal = Depends(require_finance_or_support),
+):
+    """Продлить подписку на N месяцев (1..36) через
+    `MarzbanClient.renew_subscription` (продлевает от текущего expire,
+    если активна, или от now если истекла; reset_traffic для нового
+    цикла)."""
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+    redirect = f'/admin/subscriptions/{subscription_id}'
+
+    if months < 1 or months > 36:
+        return _redirect_with_message(redirect, error='Срок продления должен быть 1..36 месяцев')
+
+    sub_view, err = await _load_sub_or_redirect(sessionmaker, subscription_id)
+    if err is not None:
+        return err
+    marzban_username = sub_view['marzban_username']
+
+    if not settings.marzban_enabled or not marzban_username:
+        return _redirect_with_message(redirect, error='Marzban отключён — продление невозможно')
+
+    client = MarzbanClient(settings)
+    try:
+        tariff_limit_gb: int | None = None
+        if sub_view['monthly_traffic_bytes']:
+            tariff_limit_gb = max(1, int(sub_view['monthly_traffic_bytes'] // (1024 ** 3)))
+        try:
+            remote = await client.renew_subscription(
+                marzban_username,
+                months=months,
+                tariff_limit_gb=tariff_limit_gb,
+                online_limit=sub_view.get('online_limit'),
+                note=f'admin_extend_{principal.username}',
+                status='active',
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Marzban renew failed sub_id=%s', subscription_id)
+            return _redirect_with_message(redirect, error=f'Marzban: {exc}')
+    finally:
+        with suppress(Exception):
+            await client.close()
+
+    new_expire = getattr(remote, 'expire_datetime', None)
+
+    async with sessionmaker.begin() as session:
+        sub_repo = SubscriptionRepository(session)
+        sub = await sub_repo.get_by_id_for_update(subscription_id)
+        if sub is None:
+            return _redirect_with_message(redirect, error='Подписка пропала между запросами')
+        previous_expire = sub.expire_date
+        if new_expire is not None:
+            sub.expire_date = new_expire
+        sub.is_active = True
+        await session.flush()
+        await AuditLogRepository(session).create(
+            action=AuditAction.subscription_extended,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='subscription',
+            entity_id=str(subscription_id),
+            details={
+                'user_id': sub_view['user_id'],
+                'months': months,
+                'previous_expire_at': previous_expire.isoformat() if previous_expire else None,
+                'new_expire_at': new_expire.isoformat() if new_expire else None,
+                'marzban_username': marzban_username,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Подписка продлена на {months} мес.')
+
+
+@router.post('/admin/subscriptions/{subscription_id}/reset-traffic', dependencies=[Depends(require_finance_or_support)])
+async def admin_subscription_reset_traffic(
+    request: Request,
+    subscription_id: int,
+    principal: WebAdminPrincipal = Depends(require_finance_or_support),
+):
+    """Сбросить использованный трафик подписки до нуля
+    (`MarzbanClient.reset_user_usage`). Локальные `used_traffic_bytes`
+    и `cycle_extra_traffic_bytes` обнуляются после успешного Marzban-вызова.
+    """
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+    redirect = f'/admin/subscriptions/{subscription_id}'
+
+    sub_view, err = await _load_sub_or_redirect(sessionmaker, subscription_id)
+    if err is not None:
+        return err
+    marzban_username = sub_view['marzban_username']
+
+    if not settings.marzban_enabled or not marzban_username:
+        return _redirect_with_message(redirect, error='Marzban отключён — сброс невозможен')
+
+    client = MarzbanClient(settings)
+    try:
+        try:
+            await client.reset_user_usage(marzban_username)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Marzban reset_user_usage failed sub_id=%s', subscription_id)
+            return _redirect_with_message(redirect, error=f'Marzban: {exc}')
+    finally:
+        with suppress(Exception):
+            await client.close()
+
+    async with sessionmaker.begin() as session:
+        sub = await SubscriptionRepository(session).get_by_id_for_update(subscription_id)
+        if sub is None:
+            return _redirect_with_message(redirect, error='Подписка пропала между запросами')
+        previous_used = int(sub.used_traffic_bytes or 0)
+        sub.used_traffic_bytes = 0
+        sub.cycle_extra_traffic_bytes = 0
+        sub.notified_low_traffic = False
+        sub.notified_exhausted = False
+        await session.flush()
+        await AuditLogRepository(session).create(
+            action=AuditAction.subscription_traffic_reset,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='subscription',
+            entity_id=str(subscription_id),
+            details={
+                'user_id': sub_view['user_id'],
+                'previous_used_bytes': previous_used,
+                'marzban_username': marzban_username,
+            },
+        )
+    return _redirect_with_message(redirect, success='Трафик подписки обнулён')
+
+
+async def _toggle_subscription_active(
+    request: Request,
+    *,
+    subscription_id: int,
+    target_active: bool,
+    audit_action: AuditAction,
+    success_message: str,
+    principal: WebAdminPrincipal,
+    reason: str | None = None,
+) -> RedirectResponse:
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+    redirect = f'/admin/subscriptions/{subscription_id}'
+
+    sub_view, err = await _load_sub_or_redirect(sessionmaker, subscription_id)
+    if err is not None:
+        return err
+    marzban_username = sub_view['marzban_username']
+    if sub_view['is_active'] == target_active:
+        return _redirect_with_message(
+            redirect,
+            error='Подписка уже в этом состоянии',
+        )
+
+    if settings.marzban_enabled and marzban_username:
+        client = MarzbanClient(settings)
+        try:
+            try:
+                await client.safe_modify_user(
+                    marzban_username,
+                    status='active' if target_active else 'disabled',
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    'Marzban toggle failed sub_id=%s target_active=%s',
+                    subscription_id,
+                    target_active,
+                )
+                return _redirect_with_message(redirect, error=f'Marzban: {exc}')
+        finally:
+            with suppress(Exception):
+                await client.close()
+
+    async with sessionmaker.begin() as session:
+        sub = await SubscriptionRepository(session).get_by_id_for_update(subscription_id)
+        if sub is None:
+            return _redirect_with_message(redirect, error='Подписка пропала между запросами')
+        sub.is_active = target_active
+        await session.flush()
+        await AuditLogRepository(session).create(
+            action=audit_action,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='subscription',
+            entity_id=str(subscription_id),
+            details={
+                'user_id': sub_view['user_id'],
+                'service_id': sub_view['service_id'],
+                'marzban_username': marzban_username,
+                'reason': reason,
+                'marzban_called': bool(settings.marzban_enabled and marzban_username),
+            },
+        )
+    return _redirect_with_message(redirect, success=success_message)
+
+
+@router.post('/admin/subscriptions/{subscription_id}/disable', dependencies=[Depends(require_finance_or_support)])
+async def admin_subscription_disable(
+    request: Request,
+    subscription_id: int,
+    reason: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_finance_or_support),
+):
+    return await _toggle_subscription_active(
+        request,
+        subscription_id=subscription_id,
+        target_active=False,
+        audit_action=AuditAction.subscription_disabled,
+        success_message='Подписка отключена',
+        principal=principal,
+        reason=(reason or '').strip()[:255] or None,
+    )
+
+
+@router.post('/admin/subscriptions/{subscription_id}/enable', dependencies=[Depends(require_finance_or_support)])
+async def admin_subscription_enable(
+    request: Request,
+    subscription_id: int,
+    principal: WebAdminPrincipal = Depends(require_finance_or_support),
+):
+    return await _toggle_subscription_active(
+        request,
+        subscription_id=subscription_id,
+        target_active=True,
+        audit_action=AuditAction.subscription_enabled,
+        success_message='Подписка снова активна',
+        principal=principal,
+    )
+
+
 @router.get('/admin/promocodes/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_promocodes(
     request: Request,

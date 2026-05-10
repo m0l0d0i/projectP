@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Подписка #{{ sub.id }}{% endblock %}
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">
+        <a href="/admin/subscriptions/" class="text-cyan-300 hover:text-cyan-200">Подписки</a> /
+        <span>#{{ sub.id }}</span>
+      </div>
+      <h1 class="mt-4 text-3xl font-bold text-white">
+        Подписка #{{ sub.id }} ·
+        <span class="inline-flex rounded-full border px-3 py-1 text-sm align-middle
+          {% if sub.status_tone == 'emerald' %}border-emerald-500/30 bg-emerald-500/10 text-emerald-300
+          {% elif sub.status_tone == 'amber' %}border-amber-500/30 bg-amber-500/10 text-amber-300
+          {% else %}border-rose-500/30 bg-rose-500/10 text-rose-300{% endif %}">{{ sub.status_label }}</span>
+      </h1>
+      <p class="mt-2 text-slate-400">
+        Service <code class="text-slate-200">{{ sub.service_id }}</code>,
+        Marzban user <code class="text-slate-200">{{ sub.marzban_username }}</code>,
+        тариф <code class="text-slate-200">{{ sub.tariff_code }}</code>.
+      </p>
+    </div>
+    <a href="/admin/users/{{ sub.user_id }}" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">→ Карточка пользователя</a>
+  </div>
+
+  {% if success_message %}<div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">✅ {{ success_message }}</div>{% endif %}
+  {% if error_message %}<div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">❌ {{ error_message }}</div>{% endif %}
+
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Пользователь</div>
+      <div class="mt-2 text-sm text-white">
+        <a href="/admin/users/{{ sub.user_id }}" class="text-cyan-300 hover:text-cyan-200">
+          {% if sub.user_username %}@{{ sub.user_username }}{% else %}id={{ sub.user_id }}{% endif %}
+        </a>
+      </div>
+      <div class="mt-1 text-xs text-slate-500">tg {{ sub.user_tg_id }}</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Истекает (локально)</div>
+      <div class="mt-2 text-sm text-white">{{ sub.expire_label }}</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Трафик (локально)</div>
+      <div class="mt-2 text-sm text-white">{{ sub.used_label }}</div>
+      <div class="mt-1 text-xs text-slate-500">{{ sub.traffic_label }}</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Создана</div>
+      <div class="mt-2 text-sm text-white">{{ sub.created_at }}</div>
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <h2 class="text-xl font-semibold text-white">📡 Marzban-snapshot</h2>
+    {% if not marzban_enabled %}
+    <p class="mt-2 text-sm text-slate-500">Marzban в проекте отключён (<code>MARZBAN_ENABLED=false</code>).</p>
+    {% elif marzban_error %}
+    <div class="mt-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+      ⚠️ Не удалось получить данные из Marzban: {{ marzban_error }}
+    </div>
+    {% elif marzban_snapshot %}
+    <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-3"><div class="text-xs text-slate-500">status</div><div class="mt-1 text-sm text-white">{{ marzban_snapshot.status }}</div></div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-3"><div class="text-xs text-slate-500">expire</div><div class="mt-1 text-sm text-white">{{ marzban_snapshot.expire_label }}</div></div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-3"><div class="text-xs text-slate-500">data_limit</div><div class="mt-1 text-sm text-white">{{ marzban_snapshot.data_limit_gb }} ГБ</div></div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-3"><div class="text-xs text-slate-500">used</div><div class="mt-1 text-sm text-white">{{ marzban_snapshot.used_gb }} ГБ</div></div>
+    </div>
+    {% if marzban_snapshot.note %}<div class="mt-3 text-xs text-slate-500">note: {{ marzban_snapshot.note }}</div>{% endif %}
+    {% endif %}
+    {% if sub_url %}<div class="mt-4"><div class="text-xs uppercase tracking-wider text-slate-500">Subscription URL</div><div class="mt-1 break-all rounded-2xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200">{{ sub_url }}</div></div>{% endif %}
+  </div>
+
+  {# FEA-ADMIN-SUB-CRM #2: базовые admin-действия #}
+  <div class="grid gap-6 xl:grid-cols-2">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">⏳ Продлить подписку</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Marzban: <code>renew_subscription</code> — продлевает от текущего expire (если активна) или от <code>now</code> (если истекла).
+        Сбрасывает использованный трафик для нового цикла. Limit ГБ берётся из <code>monthly_traffic_bytes</code>.
+      </p>
+      <form method="post" action="/admin/subscriptions/{{ sub.id }}/extend" class="mt-4 grid gap-3 sm:grid-cols-3">
+        {{ csrf_input(request)|safe }}
+        <input type="number" name="months" min="1" max="36" value="1" required class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+        <button type="submit" class="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 sm:col-span-2">Продлить на N месяцев</button>
+      </form>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">↻ Сбросить трафик</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Marzban: <code>reset_user_usage</code>. Локальные <code>used_traffic_bytes</code> и <code>cycle_extra_traffic_bytes</code> обнуляются после успеха.
+        Флаги <code>notified_low_traffic / notified_exhausted</code> тоже сбрасываются — пользователь снова получит push при пороге.
+      </p>
+      <form method="post" action="/admin/subscriptions/{{ sub.id }}/reset-traffic" class="mt-4" data-confirm="Сбросить использованный трафик подписки {{ sub.service_id }}?">
+        {{ csrf_input(request)|safe }}
+        <button type="submit" class="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-200">↻ Обнулить used_traffic</button>
+      </form>
+    </div>
+
+    <div class="rounded-3xl border {% if sub.is_active %}border-slate-800 bg-slate-900/70{% else %}border-emerald-500/40 bg-emerald-500/5{% endif %} p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">{% if sub.is_active %}⛔ Отключить{% else %}✓ Включить{% endif %} подписку</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Marzban: <code>safe_modify_user(status={% if sub.is_active %}'disabled'{% else %}'active'{% endif %})</code>; локальный <code>is_active</code> синхронизируется после успеха.
+        При сбое Marzban локальное состояние не меняется.
+      </p>
+      {% if sub.is_active %}
+      <form method="post" action="/admin/subscriptions/{{ sub.id }}/disable" class="mt-4 space-y-3" data-confirm="Отключить подписку {{ sub.service_id }}?">
+        {{ csrf_input(request)|safe }}
+        <input name="reason" maxlength="255" placeholder="Причина (для аудита)" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+        <button type="submit" class="rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-400">⛔ Отключить</button>
+      </form>
+      {% else %}
+      <form method="post" action="/admin/subscriptions/{{ sub.id }}/enable" class="mt-4" data-confirm="Включить подписку {{ sub.service_id }} обратно?">
+        {{ csrf_input(request)|safe }}
+        <button type="submit" class="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400">✓ Включить</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
