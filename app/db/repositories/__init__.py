@@ -27,6 +27,8 @@ from app.db.models import (
     Invoice,
     InvoicePurpose,
     InvoiceStatus,
+    LLMConfig,
+    LLMProviderKind,
     MarzbanPageSettings,
     NotificationRule,
     TrafficTopupOption,
@@ -2531,6 +2533,227 @@ class CannedResponseRepository:
         return row
 
     async def delete(self, row: CannedResponse) -> None:
+        await self.session.delete(row)
+        await self.session.flush()
+
+
+class LLMConfigRepository:
+    """CRUD по таблице llm_configs для support-AI (FEA-C32).
+
+    Резолв «активного» конфига — `get_active`. Гарантия «не больше
+    одного активного» обеспечивается партиальным unique-индексом
+    (`uq_llm_configs_single_active`). При вызове `set_active` — этот
+    же метод деактивирует прочие записи в той же транзакции, чтобы
+    не упереться в индекс.
+
+    `api_key` ВСЕГДА передаётся в plaintext в repo и кодируется здесь
+    через `encrypt_api_key`. Plain key из БД доставать только через
+    `app.services.support_ai.crypto.decrypt_api_key`.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    @staticmethod
+    def _normalize_temperature(value: Decimal | int | float | str) -> Decimal:
+        try:
+            normalized = Decimal(str(value)).quantize(Decimal('0.01'))
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError('temperature должна быть числом') from exc
+        if normalized < 0 or normalized > 2:
+            raise ValueError('temperature должна быть в диапазоне [0, 2]')
+        return normalized
+
+    @staticmethod
+    def _normalize_max_tokens(value: int | str) -> int:
+        try:
+            ivalue = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('max_tokens должен быть целым') from exc
+        if ivalue <= 0:
+            raise ValueError('max_tokens должен быть > 0')
+        return ivalue
+
+    @staticmethod
+    def _normalize_url(value: str) -> str:
+        normalized = (value or '').strip()
+        if not normalized:
+            raise ValueError('api_base_url не может быть пустым')
+        if len(normalized) > 512:
+            raise ValueError('api_base_url не длиннее 512 символов')
+        if not (normalized.startswith('https://') or normalized.startswith('http://')):
+            raise ValueError('api_base_url должен начинаться с http:// или https://')
+        return normalized.rstrip('/')
+
+    @staticmethod
+    def _normalize_title(value: str) -> str:
+        normalized = (value or '').strip()
+        if not normalized:
+            raise ValueError('title не может быть пустым')
+        if len(normalized) > 64:
+            raise ValueError('title не длиннее 64 символов')
+        return normalized
+
+    @staticmethod
+    def _normalize_model_name(value: str) -> str:
+        normalized = (value or '').strip()
+        if not normalized:
+            raise ValueError('model_name не может быть пустым')
+        if len(normalized) > 128:
+            raise ValueError('model_name не длиннее 128 символов')
+        return normalized
+
+    @staticmethod
+    def _normalize_system_prompt(value: str) -> str:
+        normalized = (value or '').strip()
+        if not normalized:
+            raise ValueError('system_prompt не может быть пустым')
+        return normalized
+
+    async def get_by_id(self, config_id: int) -> 'LLMConfig | None':
+        res = await self.session.execute(
+            select(LLMConfig).where(LLMConfig.id == config_id)
+        )
+        return res.scalar_one_or_none()
+
+    async def get_active(self) -> 'LLMConfig | None':
+        res = await self.session.execute(
+            select(LLMConfig).where(LLMConfig.is_active.is_(True)).limit(1)
+        )
+        return res.scalar_one_or_none()
+
+    async def list_all(self) -> 'list[LLMConfig]':
+        res = await self.session.execute(
+            select(LLMConfig).order_by(
+                LLMConfig.is_active.desc(),
+                LLMConfig.title.asc(),
+                LLMConfig.id.asc(),
+            )
+        )
+        return list(res.scalars().all())
+
+    async def create(
+        self,
+        *,
+        title: str,
+        provider: LLMProviderKind,
+        api_base_url: str,
+        model_name: str,
+        system_prompt: str,
+        api_key_encrypted: str,
+        temperature: Decimal | int | float | str = Decimal('0.30'),
+        max_tokens: int = 1024,
+        is_active: bool = False,
+        created_by_admin_id: int | None = None,
+    ) -> 'LLMConfig':
+        if not api_key_encrypted:
+            raise ValueError('api_key_encrypted обязателен')
+        row = LLMConfig(
+            title=self._normalize_title(title),
+            provider=provider,
+            api_base_url=self._normalize_url(api_base_url),
+            model_name=self._normalize_model_name(model_name),
+            system_prompt=self._normalize_system_prompt(system_prompt),
+            api_key_encrypted=api_key_encrypted,
+            temperature=self._normalize_temperature(temperature),
+            max_tokens=self._normalize_max_tokens(max_tokens),
+            is_active=False,  # активацию отдельным шагом — см. set_active
+            created_by_admin_id=int(created_by_admin_id) if created_by_admin_id is not None else None,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        if is_active:
+            await self.set_active(row)
+        return row
+
+    async def update(
+        self,
+        row: 'LLMConfig',
+        *,
+        title: str | None = None,
+        provider: LLMProviderKind | None = None,
+        api_base_url: str | None = None,
+        model_name: str | None = None,
+        system_prompt: str | None = None,
+        temperature: Decimal | int | float | str | None = None,
+        max_tokens: int | None = None,
+        api_key_encrypted: str | None = None,
+    ) -> 'LLMConfig':
+        if title is not None:
+            row.title = self._normalize_title(title)
+        if provider is not None:
+            row.provider = provider
+        if api_base_url is not None:
+            row.api_base_url = self._normalize_url(api_base_url)
+        if model_name is not None:
+            row.model_name = self._normalize_model_name(model_name)
+        if system_prompt is not None:
+            row.system_prompt = self._normalize_system_prompt(system_prompt)
+        if temperature is not None:
+            row.temperature = self._normalize_temperature(temperature)
+        if max_tokens is not None:
+            row.max_tokens = self._normalize_max_tokens(max_tokens)
+        if api_key_encrypted is not None:
+            if not api_key_encrypted:
+                raise ValueError('api_key_encrypted не может быть пустым')
+            row.api_key_encrypted = api_key_encrypted
+        await self.session.flush()
+        return row
+
+    async def set_active(self, row: 'LLMConfig') -> 'LLMConfig':
+        """Сделать row активной, деактивировав остальные.
+
+        Партиальный unique-index допускает только одну активную запись;
+        используем явный UPDATE до set, чтобы не упереться в нарушение
+        констрейнта. Транзакционность гарантируется внешней `with .begin()`.
+        """
+        await self.session.execute(
+            sa.update(LLMConfig)
+            .where(LLMConfig.id != row.id, LLMConfig.is_active.is_(True))
+            .values(is_active=False)
+        )
+        row.is_active = True
+        await self.session.flush()
+        return row
+
+    async def deactivate_all(self) -> None:
+        await self.session.execute(
+            sa.update(LLMConfig)
+            .where(LLMConfig.is_active.is_(True))
+            .values(is_active=False)
+        )
+        await self.session.flush()
+
+    async def record_usage(
+        self,
+        row: 'LLMConfig',
+        *,
+        tokens_in: int,
+        tokens_out: int,
+    ) -> 'LLMConfig':
+        row.usage_total_calls = int(row.usage_total_calls or 0) + 1
+        row.usage_total_input_tokens = int(row.usage_total_input_tokens or 0) + max(0, int(tokens_in))
+        row.usage_total_output_tokens = int(row.usage_total_output_tokens or 0) + max(0, int(tokens_out))
+        await self.session.flush()
+        return row
+
+    async def record_test_result(
+        self,
+        row: 'LLMConfig',
+        *,
+        status: str,
+        error: str | None,
+    ) -> 'LLMConfig':
+        normalized_status = (status or '').strip().lower() or 'unknown'
+        if len(normalized_status) > 16:
+            normalized_status = normalized_status[:16]
+        row.last_test_status = normalized_status
+        row.last_test_error = _normalize_optional_str(error)
+        row.last_test_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        return row
+
+    async def delete(self, row: 'LLMConfig') -> None:
         await self.session.delete(row)
         await self.session.flush()
 

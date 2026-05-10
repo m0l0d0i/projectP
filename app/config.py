@@ -173,6 +173,11 @@ class Settings(BaseSettings):
     rules_of_use_url: str | None = None
     rules_privacy_url: str | None = None
 
+    # FEA-C32: ключ Fernet для шифрования api_key LLM-провайдеров.
+    # Если не задан — derive из BOT_TOKEN (для dev/staging); в продe
+    # рекомендуется явно генерировать через Fernet.generate_key().
+    llm_secrets_key: SecretStr | None = None
+
     @staticmethod
     def _parse_listish(value: Any) -> list[Any]:
         if value is None or value == '':
@@ -316,6 +321,10 @@ class Settings(BaseSettings):
     @property
     def marzban_password_value(self) -> str | None:
         return self._secret_value(self.marzban_password)
+
+    @property
+    def llm_secrets_key_value(self) -> str | None:
+        return self._secret_value(self.llm_secrets_key)
 
     @property
     def web_admin_password_value(self) -> str:

@@ -166,12 +166,29 @@ class AuditAction(str, enum.Enum):
     canned_response_created = 'canned_response_created'
     canned_response_updated = 'canned_response_updated'
     canned_response_deleted = 'canned_response_deleted'
+    llm_config_created = 'llm_config_created'
+    llm_config_updated = 'llm_config_updated'
+    llm_config_deleted = 'llm_config_deleted'
+    llm_config_test_run = 'llm_config_test_run'
+    support_ai_generated = 'support_ai_generated'
 
 
 class AuditActorType(str, enum.Enum):
     system = 'system'
     user = 'user'
     admin = 'admin'
+
+
+class LLMProviderKind(str, enum.Enum):
+    """Поддерживаемые типы LLM-провайдеров для support-AI (FEA-C32).
+
+    `deepseek` — DeepSeek chat-completions API (api.deepseek.com).
+    `openai_compat` — любой OpenAI-совместимый /v1/chat/completions endpoint
+        (Together / Groq / локальный vLLM / и т.п.); URL и model_name
+        указываются явно в LLMConfig.
+    """
+    deepseek = 'deepseek'
+    openai_compat = 'openai_compat'
 
 
 class WebAdminRole(str, enum.Enum):
@@ -1582,6 +1599,100 @@ class CannedResponse(TimestampMixin, Base):
     )
     usage_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=sa_text('0')
+    )
+    created_by_admin_id: Mapped[int | None] = mapped_column(
+        ForeignKey('web_admin_users.id', ondelete='SET NULL'),
+        nullable=True,
+    )
+
+
+class LLMConfig(TimestampMixin, Base):
+    """Конфиг LLM-провайдера для support-AI (FEA-C32).
+
+    Резолв «текущего провайдера» делается через `is_active=true` —
+    единственная активная запись (партиальный unique-index в миграции
+    гарантирует это). API-ключ хранится в `api_key_encrypted` — Fernet
+    с ключом из `LLM_SECRETS_KEY` (или derived из bot_token, см.
+    `app.services.support_ai.crypto`). Plain key не покидает сервис.
+    """
+
+    __tablename__ = 'llm_configs'
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(trim(title)) > 0",
+            name='ck_llm_configs_title_not_blank',
+        ),
+        CheckConstraint(
+            "char_length(trim(api_base_url)) > 0",
+            name='ck_llm_configs_api_base_url_not_blank',
+        ),
+        CheckConstraint(
+            "char_length(trim(model_name)) > 0",
+            name='ck_llm_configs_model_name_not_blank',
+        ),
+        CheckConstraint(
+            "char_length(trim(system_prompt)) > 0",
+            name='ck_llm_configs_system_prompt_not_blank',
+        ),
+        CheckConstraint(
+            'temperature >= 0 AND temperature <= 2',
+            name='ck_llm_configs_temperature_range',
+        ),
+        CheckConstraint(
+            'max_tokens > 0',
+            name='ck_llm_configs_max_tokens_positive',
+        ),
+        CheckConstraint(
+            'usage_total_calls >= 0',
+            name='ck_llm_configs_usage_total_calls_non_negative',
+        ),
+        CheckConstraint(
+            'usage_total_input_tokens >= 0',
+            name='ck_llm_configs_usage_total_input_non_negative',
+        ),
+        CheckConstraint(
+            'usage_total_output_tokens >= 0',
+            name='ck_llm_configs_usage_total_output_non_negative',
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider: Mapped[LLMProviderKind] = mapped_column(
+        Enum(LLMProviderKind, name='llm_provider_kind'),
+        nullable=False,
+    )
+    api_base_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    temperature: Mapped[Decimal] = mapped_column(
+        Numeric(3, 2),
+        nullable=False,
+        default=Decimal('0.30'),
+        server_default=sa_text('0.30'),
+    )
+    max_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1024, server_default=sa_text('1024')
+    )
+    api_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa_text('false')
+    )
+    usage_total_calls: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=sa_text('0')
+    )
+    usage_total_input_tokens: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=sa_text('0')
+    )
+    usage_total_output_tokens: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=sa_text('0')
+    )
+    last_test_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default='never', server_default=sa_text("'never'")
+    )
+    last_test_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_test_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_by_admin_id: Mapped[int | None] = mapped_column(
         ForeignKey('web_admin_users.id', ondelete='SET NULL'),
