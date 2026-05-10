@@ -142,6 +142,7 @@ def create_fastapi_app(*, sessionmaker, settings) -> FastAPI:
     Local-only web admin application.
     """
     from app.services.web_admin_auth import validate_password_strength, WebAdminPasswordTooWeak
+    from app.web.auth import bootstrap_web_admin_from_env
 
     try:
         validate_password_strength(settings.web_admin_password_value)
@@ -294,6 +295,17 @@ def create_fastapi_app(*, sessionmaker, settings) -> FastAPI:
 
     app.mount('/static', StaticFiles(directory=str(static_dir)), name='static')
     app.include_router(web_admin_router)
+
+    @app.on_event('startup')
+    async def _bootstrap_web_admin() -> None:
+        # FEA-C39: создаём superadmin-запись из env при первом старте, чтобы
+        # после миграции web_admin_users (30) login сразу работал и через DB.
+        try:
+            async with sessionmaker.begin() as session:
+                await bootstrap_web_admin_from_env(session, settings)
+        except Exception:
+            logger.exception('Failed to bootstrap web-admin user from env')
+
     return app
 
 

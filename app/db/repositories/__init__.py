@@ -49,6 +49,8 @@ from app.db.models import (
     Transaction,
     TransactionType,
     User,
+    WebAdminRole,
+    WebAdminUser,
 )
 from app.services.subscription_urls import (
     SubscriptionUrlError,
@@ -2836,11 +2838,13 @@ class AuditLogRepository:
         entity_type: str,
         entity_id: str,
         details: dict | None = None,
+        actor_username: str | None = None,
     ) -> AuditLog:
         row = AuditLog(
             action=action,
             actor_type=actor_type,
             actor_tg_id=actor_tg_id,
+            actor_username=_normalize_optional_str(actor_username),
             entity_type=entity_type,
             entity_id=entity_id,
             details=details or {},
@@ -2861,6 +2865,116 @@ class AuditLogRepository:
     async def count(self) -> int:
         res = await self.session.execute(select(func.count(AuditLog.id)))
         return int(res.scalar_one())
+
+
+class WebAdminUserRepository:
+    """CRUD по таблице web_admin_users (FEA-C39).
+
+    Username trimmed; lookup case-insensitive (lower(username) уникальный
+    индекс — см. модель). Создание/изменение всегда нормализует
+    username через `_normalize_username`.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    @staticmethod
+    def _normalize_username(value: str) -> str:
+        normalized = (value or '').strip()
+        if not normalized:
+            raise ValueError('username не может быть пустым')
+        if len(normalized) > 64:
+            raise ValueError('username не длиннее 64 символов')
+        return normalized
+
+    async def get_by_id(self, admin_id: int) -> WebAdminUser | None:
+        res = await self.session.execute(
+            select(WebAdminUser).where(WebAdminUser.id == admin_id)
+        )
+        return res.scalar_one_or_none()
+
+    async def get_by_username(self, username: str) -> WebAdminUser | None:
+        normalized = (username or '').strip()
+        if not normalized:
+            return None
+        res = await self.session.execute(
+            select(WebAdminUser).where(
+                func.lower(WebAdminUser.username) == normalized.lower()
+            )
+        )
+        return res.scalar_one_or_none()
+
+    async def list_all(self) -> list[WebAdminUser]:
+        res = await self.session.execute(
+            select(WebAdminUser).order_by(
+                WebAdminUser.is_active.desc(),
+                WebAdminUser.username.asc(),
+            )
+        )
+        return list(res.scalars().all())
+
+    async def count_active_by_role(self, role: WebAdminRole) -> int:
+        res = await self.session.execute(
+            select(func.count(WebAdminUser.id)).where(
+                WebAdminUser.role == role,
+                WebAdminUser.is_active.is_(True),
+            )
+        )
+        return int(res.scalar_one())
+
+    async def create(
+        self,
+        *,
+        username: str,
+        password_hash: str,
+        role: WebAdminRole,
+        is_active: bool = True,
+        notes: str | None = None,
+    ) -> WebAdminUser:
+        normalized_username = self._normalize_username(username)
+        if not password_hash:
+            raise ValueError('password_hash обязателен')
+        row = WebAdminUser(
+            username=normalized_username,
+            password_hash=password_hash,
+            role=role,
+            is_active=bool(is_active),
+            notes=_normalize_optional_str(notes),
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def update_role(self, row: WebAdminUser, role: WebAdminRole) -> WebAdminUser:
+        row.role = role
+        await self.session.flush()
+        return row
+
+    async def update_password(self, row: WebAdminUser, password_hash: str) -> WebAdminUser:
+        if not password_hash:
+            raise ValueError('password_hash обязателен')
+        row.password_hash = password_hash
+        await self.session.flush()
+        return row
+
+    async def set_active(self, row: WebAdminUser, *, active: bool) -> WebAdminUser:
+        row.is_active = bool(active)
+        await self.session.flush()
+        return row
+
+    async def update_notes(self, row: WebAdminUser, notes: str | None) -> WebAdminUser:
+        row.notes = _normalize_optional_str(notes)
+        await self.session.flush()
+        return row
+
+    async def touch_last_login(self, row: WebAdminUser) -> WebAdminUser:
+        row.last_login_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        return row
+
+    async def delete(self, row: WebAdminUser) -> None:
+        await self.session.delete(row)
+        await self.session.flush()
 
 
 class AppLinkRepository:

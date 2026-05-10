@@ -9,7 +9,6 @@ import logging
 import io
 import os
 import re
-import secrets
 import ipaddress
 import shlex
 import shutil
@@ -72,7 +71,6 @@ from app.services.payment_engine import PaymentService
 from app.services.payments import MockPaymentProvider, PaymentProvider, PlategaProvider
 from app.services.promos import PromoService
 from app.services.routing_profiles import RoutingProfilesService, RoutingProfileValidationError
-from app.services.web_admin_auth import verify_password
 from app.services.subscription_urls import build_canonical_subscription_url, configured_public_subscription_origin
 from app.services.subscriptions import SubscriptionService
 from app.services.tariffs import PricingService
@@ -367,10 +365,21 @@ def _record_login_failure(client_ip: str) -> None:
     _login_failures[client_ip] = [t for t in bucket if t > cutoff]
 
 
-def require_web_admin(
+async def require_web_admin(
     request: Request,
     creds: HTTPBasicCredentials = Depends(web_admin_security),
-) -> None:
+):
+    """Legacy gate без role-check (FEA-C39 #1).
+
+    Аутентификация теперь идёт через `authenticate_web_admin` — сначала
+    DB (web_admin_users), при miss — fallback на env-credentials. Role-
+    проверки появятся в #2 (`require_role(...)`); пока поведение
+    эквивалентно предыдущему: любой валидный логин = доступ.
+    Возвращает `WebAdminPrincipal`, чтобы хендлеры, готовые к роли,
+    могли постепенно тянуть `actor_username` через Depends.
+    """
+    from app.web.auth import authenticate_web_admin  # лениво, ради цикл-импорта
+
     settings = request.app.state.settings
     client_ip = request.client.host if request.client else 'unknown'
 
@@ -383,16 +392,23 @@ def require_web_admin(
             headers={'Retry-After': str(retry_after), 'WWW-Authenticate': 'Basic'},
         )
 
-    valid_username = secrets.compare_digest(creds.username, settings.web_admin_username)
-    valid_password = verify_password(settings.web_admin_password_value, creds.password)
+    sessionmaker = request.app.state.sessionmaker
+    async with sessionmaker.begin() as session:
+        principal = await authenticate_web_admin(
+            session,
+            settings,
+            username=creds.username,
+            password=creds.password,
+        )
 
-    if not (valid_username and valid_password):
+    if principal is None:
         _record_login_failure(client_ip)
         raise HTTPException(
             status_code=401,
             detail='Unauthorized',
             headers={'WWW-Authenticate': 'Basic'},
         )
+    return principal
 
 
 def _money(value: Decimal | None) -> str:

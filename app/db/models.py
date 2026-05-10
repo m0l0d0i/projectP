@@ -167,6 +167,22 @@ class AuditActorType(str, enum.Enum):
     admin = 'admin'
 
 
+class WebAdminRole(str, enum.Enum):
+    """RBAC-роли веб-админки (FEA-C39).
+
+    superadmin: полный доступ, единственная роль которая управляет
+        web_admin_users и settings без ограничений.
+    finance: pricing/promocodes/invoices/balance — финансовые операции.
+    support: tickets/users (read+ограниченные write)/broadcasts —
+        ежедневная работа саппорта.
+    readonly: только GET; не может выполнять mutation-роуты.
+    """
+    superadmin = 'superadmin'
+    finance = 'finance'
+    support = 'support'
+    readonly = 'readonly'
+
+
 def generate_referral_code() -> str:
     return secrets.token_hex(5)
 
@@ -1321,6 +1337,7 @@ class AuditLog(TimestampMixin, Base):
         index=True,
     )
     actor_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    actor_username: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     entity_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=sa_text("'{}'::json"))
@@ -1437,3 +1454,46 @@ class TrafficTopupOption(TimestampMixin, Base):
         Integer, nullable=False, default=100, server_default=sa_text('100')
     )
     badge_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class WebAdminUser(TimestampMixin, Base):
+    """Пользователь веб-админки с RBAC-ролью (FEA-C39).
+
+    Bootstrap: запись с username из `WEB_ADMIN_USERNAME` создаётся при
+    старте, если её ещё нет, с ролью `superadmin` и password_hash из
+    env (см. app.web.auth.bootstrap_web_admin_from_env). Пока в таблице
+    есть legacy-fallback на env-credentials, чтобы не ломать боевые
+    деплои до миграции операторами.
+    """
+
+    __tablename__ = 'web_admin_users'
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(trim(username)) > 0",
+            name='ck_web_admin_users_username_not_blank',
+        ),
+        CheckConstraint(
+            "char_length(password_hash) > 0",
+            name='ck_web_admin_users_password_hash_not_blank',
+        ),
+        Index(
+            'uq_web_admin_users_username_lower',
+            sa_text('lower(username)'),
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[WebAdminRole] = mapped_column(
+        Enum(WebAdminRole, name='web_admin_role'),
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa_text('true')
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
