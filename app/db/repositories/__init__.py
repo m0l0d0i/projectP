@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
@@ -1995,12 +1996,40 @@ class SupportTicketRepository:
             .subquery()
         )
 
-    def _apply_admin_filters(self, stmt, *, query: str | None, status: SupportTicketStatus | None):
-        normalized_query = self._normalize_search_query(query)
+    # FEA-C31: спец-значение для фильтра «не назначен» (assignee IS NULL).
+    UNASSIGNED_FILTER = -1
 
+    def _apply_admin_filters(
+        self,
+        stmt,
+        *,
+        query: str | None,
+        status: SupportTicketStatus | None,
+        assignee_admin_id: int | None = None,
+        tag: str | None = None,
+    ):
         if status is not None:
             stmt = stmt.where(SupportTicket.status == status)
 
+        if assignee_admin_id is not None:
+            if assignee_admin_id == self.UNASSIGNED_FILTER:
+                stmt = stmt.where(SupportTicket.assignee_admin_id.is_(None))
+            else:
+                stmt = stmt.where(SupportTicket.assignee_admin_id == assignee_admin_id)
+
+        if tag:
+            normalized_tag = tag.strip().lower()
+            if normalized_tag:
+                # FEA-C31: фильтр по JSON-массиву тегов через текстовый LIKE
+                # (надёжно работает и для sa.JSON, и для JSONB без cast'ов).
+                # Теги нормализованы lowercase + dedup в add_tag, так что
+                # точное совпадение «"<tag>"» в JSON-сериализации.
+                like_pattern = f'%"{normalized_tag}"%'
+                stmt = stmt.where(
+                    func.cast(SupportTicket.tags, sa.Text()).ilike(like_pattern)
+                )
+
+        normalized_query = self._normalize_search_query(query)
         if not normalized_query:
             return stmt
 
@@ -2055,13 +2084,21 @@ class SupportTicketRepository:
         *,
         query: str | None = None,
         status: SupportTicketStatus | None = None,
+        assignee_admin_id: int | None = None,
+        tag: str | None = None,
     ) -> int:
         stmt = (
             select(func.count(func.distinct(SupportTicket.id)))
             .select_from(SupportTicket)
             .join(User, User.id == SupportTicket.user_id)
         )
-        stmt = self._apply_admin_filters(stmt, query=query, status=status)
+        stmt = self._apply_admin_filters(
+            stmt,
+            query=query,
+            status=status,
+            assignee_admin_id=assignee_admin_id,
+            tag=tag,
+        )
         res = await self.session.execute(stmt)
         return int(res.scalar_one())
 
@@ -2072,12 +2109,16 @@ class SupportTicketRepository:
         status: SupportTicketStatus | None = None,
         limit: int = 20,
         offset: int = 0,
+        assignee_admin_id: int | None = None,
+        tag: str | None = None,
     ) -> list[SupportTicket]:
         rows = await self.list_for_admin_with_meta(
             query=query,
             status=status,
             limit=limit,
             offset=offset,
+            assignee_admin_id=assignee_admin_id,
+            tag=tag,
         )
         return [row[0] for row in rows]
 
@@ -2089,6 +2130,8 @@ class SupportTicketRepository:
         limit: int = 20,
         offset: int = 0,
         unanswered_first: bool = False,
+        assignee_admin_id: int | None = None,
+        tag: str | None = None,
     ) -> list[tuple[SupportTicket, datetime | None, bool]]:
         last_message_subq = self._last_message_subquery()
         admin_reply_subq = self._admin_reply_subquery()
@@ -2103,7 +2146,13 @@ class SupportTicketRepository:
             .outerjoin(last_message_subq, last_message_subq.c.ticket_id == SupportTicket.id)
             .outerjoin(admin_reply_subq, admin_reply_subq.c.ticket_id == SupportTicket.id)
         )
-        stmt = self._apply_admin_filters(stmt, query=query, status=status)
+        stmt = self._apply_admin_filters(
+            stmt,
+            query=query,
+            status=status,
+            assignee_admin_id=assignee_admin_id,
+            tag=tag,
+        )
 
         sort_last_activity = func.coalesce(last_message_subq.c.last_message_at, SupportTicket.created_at)
         waiting_priority = case(

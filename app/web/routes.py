@@ -47,6 +47,7 @@ from app.db.repositories import (
     AppSettingsRepository,
     AuditLogRepository,
     BroadcastJobRepository,
+    CannedResponseRepository,
     InvoiceRepository,
     MarzbanPageSettingsRepository,
     NotificationRuleRepository,
@@ -4408,6 +4409,30 @@ async def admin_whoami(
     )
 
 
+def _parse_assignee_filter(
+    raw: str | None,
+    *,
+    current_admin_db_id: int | None,
+) -> tuple[int | None, str]:
+    """Возвращает (assignee_admin_id_or_None_or_unassigned_sentinel, normalized_value).
+
+    Поддерживает значения: '' (без фильтра), 'me' (current_admin), 'unassigned'
+    (тикеты без assignee), '<int>' (конкретный admin_id). Если выбрано 'me'
+    но залогинен legacy-юзер без db_id — фильтр игнорируется (нет связки).
+    """
+    raw_normalized = (raw or '').strip().lower()
+    if not raw_normalized:
+        return None, ''
+    if raw_normalized == 'me':
+        return (current_admin_db_id, 'me') if current_admin_db_id is not None else (None, '')
+    if raw_normalized == 'unassigned':
+        return SupportTicketRepository.UNASSIGNED_FILTER, 'unassigned'
+    try:
+        return int(raw_normalized), raw_normalized
+    except ValueError:
+        return None, ''
+
+
 @router.get('/admin/tickets/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_tickets(
     request: Request,
@@ -4415,6 +4440,9 @@ async def admin_tickets(
     status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     unanswered_first: bool = Query(default=False),
+    assignee: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    principal: WebAdminPrincipal = Depends(require_any),
 ):
     templates = request.app.state.templates
     sessionmaker = request.app.state.sessionmaker
@@ -4428,16 +4456,30 @@ async def admin_tickets(
         {'value': SupportTicketStatus.closed.value, 'label': 'Закрытые'},
     ]
 
+    assignee_filter, assignee_normalized = _parse_assignee_filter(
+        assignee, current_admin_db_id=principal.db_id,
+    )
+    tag_filter = (tag or '').strip().lower() or None
+
     async with sessionmaker() as session:
         repo = SupportTicketRepository(session)
-        total = await repo.count_for_admin(query=q, status=status_enum)
+        admin_repo = WebAdminUserRepository(session)
+        total = await repo.count_for_admin(
+            query=q,
+            status=status_enum,
+            assignee_admin_id=assignee_filter,
+            tag=tag_filter,
+        )
         rows = await repo.list_for_admin_with_meta(
             query=q,
             status=status_enum,
             limit=ADMIN_PAGE_SIZE,
             offset=offset,
             unanswered_first=unanswered_first,
+            assignee_admin_id=assignee_filter,
+            tag=tag_filter,
         )
+        admins_for_filter = await admin_repo.list_all()
 
     now = datetime.now(timezone.utc)
     ticket_rows = []
@@ -4472,6 +4514,10 @@ async def admin_tickets(
             'has_next': offset + len(ticket_rows) < total,
             'success_message': request.query_params.get('success'),
             'error_message': request.query_params.get('error'),
+            'assignee_filter': assignee_normalized,
+            'tag_filter': tag_filter or '',
+            'admins_for_filter': admins_for_filter,
+            'current_admin_db_id': principal.db_id,
         },
     )
 
@@ -4485,6 +4531,8 @@ async def admin_ticket_detail(request: Request, ticket_id: int):
         ticket_repo = SupportTicketRepository(session)
         msg_repo = SupportMessageRepository(session)
         user_repo = UserRepository(session)
+        admin_repo = WebAdminUserRepository(session)
+        canned_repo = CannedResponseRepository(session)
 
         ticket = await ticket_repo.get_by_id(ticket_id)
         if ticket is None:
@@ -4494,6 +4542,11 @@ async def admin_ticket_detail(request: Request, ticket_id: int):
         user = await user_repo.get_by_id(ticket.user_id)
         last_message_at = await ticket_repo.get_last_message_timestamp(ticket_id)
         has_admin_reply = await ticket_repo.has_admin_reply(ticket_id)
+        admins_list = await admin_repo.list_all()
+        canned_responses = await canned_repo.list_active()
+        assignee = None
+        if ticket.assignee_admin_id is not None:
+            assignee = await admin_repo.get_by_id(ticket.assignee_admin_id)
 
     return templates.TemplateResponse(
         request,
@@ -4516,10 +4569,139 @@ async def admin_ticket_detail(request: Request, ticket_id: int):
                 getattr(ticket, 'closed_by_admin_tg_id', None),
             ),
             'ticket_close_reason': _normalized_optional_form_text(getattr(ticket, 'close_reason', None)),
+            'admins_list': admins_list,
+            'canned_responses': canned_responses,
+            'ticket_assignee': assignee,
+            'ticket_tags': list(ticket.tags or []),
             'success_message': request.query_params.get('success'),
             'error_message': request.query_params.get('error'),
         },
     )
+
+
+@router.post('/admin/tickets/{ticket_id}/assignee', dependencies=[Depends(require_support)])
+async def admin_ticket_set_assignee(
+    request: Request,
+    ticket_id: int,
+    assignee_admin_id: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/tickets/{ticket_id}'
+    raw = (assignee_admin_id or '').strip()
+    new_assignee_id: int | None
+    if not raw or raw == '0':
+        new_assignee_id = None
+    else:
+        try:
+            new_assignee_id = int(raw)
+        except ValueError:
+            return _redirect_with_message(redirect, error='Некорректный ID assignee')
+
+    async with sessionmaker.begin() as session:
+        ticket_repo = SupportTicketRepository(session)
+        admin_repo = WebAdminUserRepository(session)
+        ticket = await ticket_repo.get_by_id_for_update(ticket_id)
+        if ticket is None:
+            raise HTTPException(status_code=404, detail='Ticket not found')
+
+        target_username: str | None = None
+        if new_assignee_id is not None:
+            target = await admin_repo.get_by_id(new_assignee_id)
+            if target is None:
+                return _redirect_with_message(redirect, error='Веб-админ не найден')
+            if not target.is_active:
+                return _redirect_with_message(redirect, error='Нельзя назначить деактивированного веб-админа')
+            target_username = target.username
+
+        old_assignee_id = ticket.assignee_admin_id
+        await ticket_repo.set_assignee(ticket, new_assignee_id)
+        await AuditLogRepository(session).create(
+            action=AuditAction.ticket_assigned,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='support_ticket',
+            entity_id=str(ticket_id),
+            details={
+                'old_assignee_admin_id': old_assignee_id,
+                'new_assignee_admin_id': new_assignee_id,
+                'new_assignee_username': target_username,
+            },
+        )
+
+    if new_assignee_id is None:
+        return _redirect_with_message(redirect, success='Assignee снят')
+    return _redirect_with_message(
+        redirect, success=f'Assignee = {target_username or new_assignee_id}',
+    )
+
+
+@router.post('/admin/tickets/{ticket_id}/tags/add', dependencies=[Depends(require_support)])
+async def admin_ticket_add_tag(
+    request: Request,
+    ticket_id: int,
+    tag: str = Form(...),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/tickets/{ticket_id}'
+
+    async with sessionmaker.begin() as session:
+        ticket_repo = SupportTicketRepository(session)
+        ticket = await ticket_repo.get_by_id_for_update(ticket_id)
+        if ticket is None:
+            raise HTTPException(status_code=404, detail='Ticket not found')
+        try:
+            await ticket_repo.add_tag(ticket, tag)
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.ticket_tagged,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='support_ticket',
+            entity_id=str(ticket_id),
+            details={
+                'op': 'add',
+                'tag': tag.strip().lower(),
+                'tags_after': list(ticket.tags or []),
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Тег «{tag.strip().lower()}» добавлен')
+
+
+@router.post('/admin/tickets/{ticket_id}/tags/remove', dependencies=[Depends(require_support)])
+async def admin_ticket_remove_tag(
+    request: Request,
+    ticket_id: int,
+    tag: str = Form(...),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/tickets/{ticket_id}'
+
+    async with sessionmaker.begin() as session:
+        ticket_repo = SupportTicketRepository(session)
+        ticket = await ticket_repo.get_by_id_for_update(ticket_id)
+        if ticket is None:
+            raise HTTPException(status_code=404, detail='Ticket not found')
+        await ticket_repo.remove_tag(ticket, tag)
+        await AuditLogRepository(session).create(
+            action=AuditAction.ticket_tagged,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='support_ticket',
+            entity_id=str(ticket_id),
+            details={
+                'op': 'remove',
+                'tag': tag.strip().lower(),
+                'tags_after': list(ticket.tags or []),
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Тег «{tag.strip().lower()}» удалён')
 
 
 @router.post('/admin/tickets/{ticket_id}/close', dependencies=[Depends(require_support)])

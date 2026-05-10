@@ -149,6 +149,29 @@
         </label>
       </div>
 
+      <div class="lg:col-span-2">
+        <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+          <span>Assignee</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Фильтр по назначенному веб-админу. «Я» = тикеты, где assignee — текущий пользователь.">?</span>
+        </label>
+        <select name="assignee" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500">
+          <option value="" {% if not assignee_filter %}selected{% endif %}>— любой —</option>
+          {% if current_admin_db_id %}<option value="me" {% if assignee_filter == 'me' %}selected{% endif %}>Я</option>{% endif %}
+          <option value="unassigned" {% if assignee_filter == 'unassigned' %}selected{% endif %}>Не назначен</option>
+          {% for adm in admins_for_filter %}
+          <option value="{{ adm.id }}" {% if assignee_filter == (adm.id|string) %}selected{% endif %}>{{ adm.username }} ({{ adm.role.value }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="lg:col-span-2">
+        <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+          <span>Тег</span>
+          <span class="help-dot" tabindex="0" data-tooltip="Фильтр по тегу. Сравнение точное: «billing» не найдёт «billing-refund».">?</span>
+        </label>
+        <input type="text" name="tag" value="{{ tag_filter }}" placeholder="напр. billing" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500">
+      </div>
+
       <div class="lg:col-span-4 flex flex-wrap gap-3">
         <button
           type="submit"
@@ -206,6 +229,16 @@
               {% if row.ticket.closed_at %}
               <div class="mt-1 text-xs text-slate-500">
                 Закрыт: {{ row.ticket.closed_at.strftime("%Y-%m-%d %H:%M UTC") }}
+              </div>
+              {% endif %}
+              {% if row.ticket.assignee_admin_id %}
+              <div class="mt-1 inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-xs text-cyan-200">👤 #{{ row.ticket.assignee_admin_id }}</div>
+              {% endif %}
+              {% if row.ticket.tags %}
+              <div class="mt-1 flex flex-wrap gap-1">
+                {% for t in row.ticket.tags %}
+                <span class="inline-flex rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 text-[10px] text-slate-300">{{ t }}</span>
+                {% endfor %}
               </div>
               {% endif %}
             </td>
