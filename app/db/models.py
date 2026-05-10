@@ -171,6 +171,14 @@ class AuditAction(str, enum.Enum):
     llm_config_deleted = 'llm_config_deleted'
     llm_config_test_run = 'llm_config_test_run'
     support_ai_generated = 'support_ai_generated'
+    user_notes_updated = 'user_notes_updated'
+    user_tag_added = 'user_tag_added'
+    user_tag_removed = 'user_tag_removed'
+    user_blocked = 'user_blocked'
+    user_unblocked = 'user_unblocked'
+    user_trial_reset = 'user_trial_reset'
+    user_admin_dm_sent = 'user_admin_dm_sent'
+    user_force_subscription_disabled = 'user_force_subscription_disabled'
 
 
 class AuditActorType(str, enum.Enum):
@@ -256,6 +264,14 @@ class User(TimestampMixin, Base):
     )
     bot_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     bot_blocked_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # FEA-ADMIN-USER-CRM: служебные заметки админа и теги (vip / chargeback /
+    # support_priority / ...). Заметки видит только web-admin; теги
+    # отображаются в карточке пользователя и могут использоваться сегментами.
+    admin_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=sa_text("'[]'::json")
+    )
 
     subscriptions: Mapped[list['Subscription']] = relationship(back_populates='user', cascade='all, delete-orphan')
     transactions: Mapped[list['Transaction']] = relationship(back_populates='user')

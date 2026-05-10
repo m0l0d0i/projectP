@@ -319,6 +319,68 @@ class UserRepository:
         user.bot_blocked_at = datetime.now(timezone.utc) if blocked else None
         user.bot_blocked_reason = reason if blocked else None
 
+    @staticmethod
+    def _normalize_user_tag(value: str) -> str:
+        """Нормализует один тег: trim + lowercase + ≤32 символа.
+
+        Пустая строка/слишком длинный тег → ValueError. UI отвечает за
+        парсинг множественного ввода (запятые/пробелы) и предварительный
+        дедуп; сюда приходят уже одиночные значения.
+        """
+        normalized = (value or '').strip().lower()
+        if not normalized:
+            raise ValueError('Тег не может быть пустым')
+        if len(normalized) > 32:
+            raise ValueError(f'Тег «{value}» длиннее 32 символов')
+        return normalized
+
+    async def set_admin_notes(self, user: User, notes: str | None) -> User:
+        """Заменить служебные заметки админа (Text). Пустая строка → NULL."""
+        user.admin_notes = _normalize_optional_str(notes)
+        await self.session.flush()
+        return user
+
+    async def add_tag(self, user: User, tag: str) -> bool:
+        """Добавить тег пользователю. Возвращает True если тег был добавлен,
+        False если он уже присутствовал. Реассайн list — обязателен для
+        SQLAlchemy JSON-dirty (mutations on Python list не детектируются).
+        """
+        normalized = self._normalize_user_tag(tag)
+        current = list(user.tags or [])
+        if normalized in current:
+            return False
+        current.append(normalized)
+        user.tags = current
+        await self.session.flush()
+        return True
+
+    async def remove_tag(self, user: User, tag: str) -> bool:
+        """Удалить тег. Возвращает True если был удалён, False если тега
+        нет. Сравнение через ту же нормализацию (lowercase + trim)."""
+        normalized = (tag or '').strip().lower()
+        if not normalized:
+            return False
+        current = list(user.tags or [])
+        if normalized not in current:
+            return False
+        current = [t for t in current if t != normalized]
+        user.tags = current
+        await self.session.flush()
+        return True
+
+    async def reset_trial(self, user: User) -> bool:
+        """Обнулить `trial_issued_at` (для повторной выдачи trial-подписки).
+
+        Не трогает существующие подписки — они продолжают жить как
+        обычные. Возвращает True если поле было заполнено и сброшено,
+        False если пользователь и так не получал trial.
+        """
+        if user.trial_issued_at is None:
+            return False
+        user.trial_issued_at = None
+        await self.session.flush()
+        return True
+
     async def search(self, query: str, limit: int = 20) -> list[User]:
         normalized_query = self._normalize_search_query(query)
         if not normalized_query:
