@@ -4755,6 +4755,190 @@ async def admin_ticket_close(
     return _redirect_with_message(f'/admin/tickets/{ticket_id}', success='Тикет закрыт')
 
 
+def _parse_canned_tags(raw: str | None) -> list[str]:
+    """Принимает строку с тегами через запятую/пробел, нормализует lowercase + dedup."""
+    if not raw:
+        return []
+    parts = re.split(r'[\s,;]+', raw.strip())
+    seen: set[str] = set()
+    result: list[str] = []
+    for part in parts:
+        normalized = part.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        if len(normalized) > 32:
+            raise ValueError(f'Тег «{normalized}» длиннее 32 символов')
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _canned_response_view(row) -> dict[str, Any]:
+    return {
+        'id': row.id,
+        'code': row.code,
+        'title': row.title,
+        'content': row.content,
+        'tags': list(row.tags or []),
+        'tags_text': ', '.join(row.tags or []),
+        'is_active': row.is_active,
+        'sort_order': row.sort_order,
+        'usage_count': row.usage_count,
+        'created_at': row.created_at,
+        'updated_at': row.updated_at,
+    }
+
+
+@router.get('/admin/canned-responses/', response_class=HTMLResponse, dependencies=[Depends(require_support)])
+async def admin_canned_responses(request: Request):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+    async with sessionmaker() as session:
+        rows = await CannedResponseRepository(session).list_all()
+    items = [_canned_response_view(r) for r in rows]
+    return templates.TemplateResponse(
+        request,
+        'admin_canned_responses.html',
+        {
+            'current_page': 'canned_responses',
+            'items': items,
+            'total': len(items),
+            'active_total': sum(1 for it in items if it['is_active']),
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+@router.post('/admin/canned-responses/', dependencies=[Depends(require_support)])
+async def admin_canned_responses_create(
+    request: Request,
+    code: str = Form(...),
+    title: str = Form(...),
+    content: str = Form(...),
+    tags: str = Form(default=''),
+    sort_order: int = Form(default=100),
+    is_active: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/canned-responses/'
+    try:
+        normalized_tags = _parse_canned_tags(tags)
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+
+    async with sessionmaker.begin() as session:
+        repo = CannedResponseRepository(session)
+        if await repo.get_by_code(code) is not None:
+            return _redirect_with_message(redirect, error=f'Код «{code}» уже используется')
+        try:
+            row = await repo.create(
+                code=code,
+                title=title,
+                content=content,
+                tags=normalized_tags,
+                is_active=bool(is_active),
+                sort_order=sort_order,
+                created_by_admin_id=principal.db_id,
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.canned_response_created,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='canned_response',
+            entity_id=str(row.id),
+            details={
+                'code': row.code,
+                'title': row.title,
+                'tags': list(row.tags or []),
+                'is_active': row.is_active,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Шаблон «{code}» создан')
+
+
+@router.post('/admin/canned-responses/{response_id}', dependencies=[Depends(require_support)])
+async def admin_canned_responses_update(
+    request: Request,
+    response_id: int,
+    title: str = Form(...),
+    content: str = Form(...),
+    tags: str = Form(default=''),
+    sort_order: int = Form(default=100),
+    is_active: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/canned-responses/'
+    try:
+        normalized_tags = _parse_canned_tags(tags)
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+
+    async with sessionmaker.begin() as session:
+        repo = CannedResponseRepository(session)
+        row = await repo.get_by_id(response_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='Шаблон не найден')
+        try:
+            await repo.update(
+                row,
+                title=title,
+                content=content,
+                tags=normalized_tags,
+                is_active=bool(is_active),
+                sort_order=sort_order,
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.canned_response_updated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='canned_response',
+            entity_id=str(row.id),
+            details={
+                'code': row.code,
+                'tags': list(row.tags or []),
+                'is_active': row.is_active,
+                'sort_order': row.sort_order,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Шаблон «{row.code}» обновлён')
+
+
+@router.post('/admin/canned-responses/{response_id}/delete', dependencies=[Depends(require_support)])
+async def admin_canned_responses_delete(
+    request: Request,
+    response_id: int,
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/canned-responses/'
+    async with sessionmaker.begin() as session:
+        repo = CannedResponseRepository(session)
+        row = await repo.get_by_id(response_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='Шаблон не найден')
+        code = row.code
+        await repo.delete(row)
+        await AuditLogRepository(session).create(
+            action=AuditAction.canned_response_deleted,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='canned_response',
+            entity_id=str(response_id),
+            details={'code': code},
+        )
+    return _redirect_with_message(redirect, success=f'Шаблон «{code}» удалён')
+
+
 @router.get('/admin/promocodes/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_promocodes(
     request: Request,

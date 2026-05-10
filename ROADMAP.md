@@ -65,7 +65,10 @@
 
 - [ ] **FEA-C28 (XL, P3).** Multi-tenant / reseller — `tenant_id` на User/Subscription/Invoice/Tariff; роутинг по bot-token.
 - [ ] **FEA-C30 (M, P2).** Cohort/retention dashboards — D1/D7/D30, MRR, LTV by source. `/admin/analytics/` + Chart.js.
-- [ ] **FEA-C31 (M, P1).** CRM-lite для саппорта (D7 prereq): `tags JSONB`, `assignee_admin_id`, `CannedResponse`. Editor в `/admin/tickets/`. Делается **до** FEA-C32.
+- [x] **FEA-C31 (M, P1).** CRM-lite для саппорта — закрыто Sprint 3.
+  - Миграция 32: `support_tickets.assignee_admin_id` (FK `web_admin_users.id` ON DELETE SET NULL) + `support_tickets.tags` JSONB + новая таблица `canned_responses` (id/code unique/title/content/tags JSONB/is_active/sort_order/usage_count/created_by_admin_id) + 5 новых `AuditAction` (`ticket_assigned/ticket_tagged/canned_response_{created,updated,deleted}`) + seed 15 шаблонов RU саппорта по 4 категориям (onboarding/troubleshooting/billing/closing).
+  - `SupportTicketRepository`: `set_assignee/add_tag/remove_tag` + `_apply_admin_filters` принимает `assignee_admin_id` (с sentinel UNASSIGNED_FILTER=-1) и `tag` (text-LIKE по CAST(tags AS TEXT) — работает для sa.JSON и JSONB). `CannedResponseRepository`: CRUD + `increment_usage` (готово для FEA-C32 AI-flow).
+  - `/admin/tickets/` — фильтры assignee (любой/Я/не назначен/конкретный admin) и tag, в строке таблицы chip с assignee_admin_id и тегами. `/admin/tickets/{id}` — три новые секции: Назначение (select + POST), Теги (chip-список с remove + add-форма), Шаблоны ответов (collapsible-список активных canned_responses, копируется вручную). `/admin/canned-responses/` — CRUD, доступ через require_support.
 - [ ] **FEA-C32 (M, P1, D7).** AI-помощник саппорта с pluggable LLM. Default — DeepSeek; абстракция позволит поменять на любой OpenAI-compatible endpoint.
   - Каркас `app/services/support_ai/{base,deepseek,openai_compat}.py` (фабрика провайдеров + Protocol интерфейс).
   - Конфиг через `AppSettings` или новую таблицу `LLMConfig`: provider, api_base_url, model_name, temperature, system_prompt, encrypted api_key.
