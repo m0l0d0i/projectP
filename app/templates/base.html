@@ -22,6 +22,8 @@
     'notifications': 'Push-уведомления',
     'upsells_traffic': 'Апсейлы: трафик',
     'upsells_devices': 'Апсейлы: устройства',
+    'web_admins': 'Веб-админы',
+    'whoami': 'Кто я',
     'broadcasts': 'Рассылки',
     'promocodes': 'Промокоды',
     'marzban_page': 'Страница подписки Marzban',
@@ -45,6 +47,8 @@
     'notifications': 'Сценарии smart push-уведомлений (FEA-NOTIF): шаблоны, cooldown, метрики.',
     'upsells_traffic': 'Опции «докупки» трафика (FEA-A8): CRUD, бейджи, лучшая цена/ГБ.',
     'upsells_devices': 'Mid-cycle апсейл устройств (FEA-A9): on/off, режим расчёта и live preview.',
+    'web_admins': 'Веб-админы и RBAC-роли (FEA-C39): CRUD, матрица прав, audit на каждый mutation.',
+    'whoami': 'Текущая роль и список разрешённых разделов админки.',
     'broadcasts': 'Черновики, отложенные и выполненные рассылки с контентом и кнопками.',
     'promocodes': 'Создание, изменение, архив и контроль использования промокодов.',
     'marzban_page': 'Редактирование, preview и безопасное применение live-страницы Marzban.',
@@ -99,6 +103,14 @@
 
           <a href="/admin/people/" class="block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'people' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
             Люди и роли
+          </a>
+
+          <a href="/admin/web-admins/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'web_admins' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
+            Веб-админы
+          </a>
+
+          <a href="/admin/whoami" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'whoami' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
+            Кто я
           </a>
 
           <a href="/admin/pricing/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'pricing' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">

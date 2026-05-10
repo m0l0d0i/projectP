@@ -24,7 +24,6 @@ from urllib.parse import quote_plus, urlparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +40,7 @@ from app.db.models import (
     SupportTicketStatus,
     TransactionType,
     User,
+    WebAdminRole,
 )
 from app.db.repositories import (
     AppLinkRepository,
@@ -59,6 +59,7 @@ from app.db.repositories import (
     TariffRepository,
     TransactionRepository,
     UserRepository,
+    WebAdminUserRepository,
 )
 from app.db.repositories.node_registry import NodeRegistryRepository
 from app.services.broadcasts import BroadcastService, BroadcastValidationError
@@ -69,6 +70,10 @@ from app.services.marzban_template_renderer import MarzbanTemplateRenderer
 from app.services.node_policy import NodePolicyService
 from app.services.payment_engine import PaymentService
 from app.services.payments import MockPaymentProvider, PaymentProvider, PlategaProvider
+from app.services.web_admin_auth import (
+    MIN_PLAINTEXT_PASSWORD_LENGTH,
+    hash_password,
+)
 from app.services.promos import PromoService
 from app.services.routing_profiles import RoutingProfilesService, RoutingProfileValidationError
 from app.services.subscription_urls import build_canonical_subscription_url, configured_public_subscription_origin
@@ -83,6 +88,7 @@ from app.utils.runtime_settings import (
     effective_optional_int_from_row,
 )
 from app.web.auth import (
+    WebAdminPrincipal,
     require_any,
     require_finance,
     require_finance_or_support,
@@ -371,52 +377,6 @@ def _record_login_failure(client_ip: str) -> None:
     bucket = _login_failures.setdefault(client_ip, [])
     bucket.append(now)
     _login_failures[client_ip] = [t for t in bucket if t > cutoff]
-
-
-async def require_web_admin(
-    request: Request,
-    creds: HTTPBasicCredentials = Depends(web_admin_security),
-):
-    """Legacy gate без role-check (FEA-C39 #1).
-
-    Аутентификация теперь идёт через `authenticate_web_admin` — сначала
-    DB (web_admin_users), при miss — fallback на env-credentials. Role-
-    проверки появятся в #2 (`require_role(...)`); пока поведение
-    эквивалентно предыдущему: любой валидный логин = доступ.
-    Возвращает `WebAdminPrincipal`, чтобы хендлеры, готовые к роли,
-    могли постепенно тянуть `actor_username` через Depends.
-    """
-    from app.web.auth import authenticate_web_admin  # лениво, ради цикл-импорта
-
-    settings = request.app.state.settings
-    client_ip = request.client.host if request.client else 'unknown'
-
-    allowed, retry_after = _login_rate_limit_check(client_ip)
-    if not allowed:
-        logger.warning('Web-admin login rate-limited: ip=%s retry_after=%s', client_ip, retry_after)
-        raise HTTPException(
-            status_code=429,
-            detail='Too many failed login attempts',
-            headers={'Retry-After': str(retry_after), 'WWW-Authenticate': 'Basic'},
-        )
-
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker.begin() as session:
-        principal = await authenticate_web_admin(
-            session,
-            settings,
-            username=creds.username,
-            password=creds.password,
-        )
-
-    if principal is None:
-        _record_login_failure(client_ip)
-        raise HTTPException(
-            status_code=401,
-            detail='Unauthorized',
-            headers={'WWW-Authenticate': 'Basic'},
-        )
-    return principal
 
 
 def _money(value: Decimal | None) -> str:
@@ -4155,6 +4115,297 @@ async def admin_upsells_devices_update(
             },
         )
     return _redirect_with_message(redirect, success='Настройки апсейла устройств сохранены')
+
+
+# --- /admin/web-admins/ — RBAC management (FEA-C39 #3) ----------------------
+
+# Матрица прав: какие роли что могут делать. Используется и для UI
+# подсветки, и потенциально для будущих read-only-проверок. Источник
+# истины для значений — это require_role/Depends в самих роутах; эта
+# таблица — справочное представление.
+_ROLE_CAPABILITY_MATRIX: tuple[tuple[str, dict[str, bool]], ...] = (
+    ('Дашборд / Поиск', {'superadmin': True, 'finance': True, 'support': True, 'readonly': True}),
+    ('Пользователи (read)', {'superadmin': True, 'finance': True, 'support': True, 'readonly': True}),
+    ('Баланс пользователя (write)', {'superadmin': True, 'finance': True, 'support': False, 'readonly': False}),
+    ('Тарифы / Промокоды / Инвойсы (write)', {'superadmin': True, 'finance': True, 'support': False, 'readonly': False}),
+    ('Апсейлы трафика/устройств (write)', {'superadmin': True, 'finance': True, 'support': False, 'readonly': False}),
+    ('Тикеты (close) / Рассылки / Push-правила', {'superadmin': True, 'finance': False, 'support': True, 'readonly': False}),
+    ('Trial / Antispam / Rules / Links', {'superadmin': True, 'finance': False, 'support': False, 'readonly': False}),
+    ('Marzban / Nodes / Routing-profiles (write)', {'superadmin': True, 'finance': False, 'support': False, 'readonly': False}),
+    ('Веб-админы (RBAC management)', {'superadmin': True, 'finance': False, 'support': False, 'readonly': False}),
+)
+
+
+def _web_admin_view(row, *, current_username: str) -> dict[str, Any]:
+    return {
+        'id': row.id,
+        'username': row.username,
+        'role': row.role.value,
+        'is_active': row.is_active,
+        'last_login_at': row.last_login_at,
+        'created_at': row.created_at,
+        'updated_at': row.updated_at,
+        'notes': row.notes or '',
+        'is_self': row.username.lower() == (current_username or '').lower(),
+    }
+
+
+def _parse_web_admin_role(value: str | None) -> WebAdminRole:
+    normalized = (value or '').strip().lower()
+    try:
+        return WebAdminRole(normalized)
+    except ValueError as exc:
+        raise ValueError(f'Неизвестная роль: {value!r}') from exc
+
+
+@router.get('/admin/web-admins/', response_class=HTMLResponse, dependencies=[Depends(require_superadmin)])
+async def admin_web_admins(
+    request: Request,
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+    async with sessionmaker() as session:
+        rows = await WebAdminUserRepository(session).list_all()
+        active_supers = await WebAdminUserRepository(session).count_active_by_role(WebAdminRole.superadmin)
+    admins = [_web_admin_view(r, current_username=principal.username) for r in rows]
+    return templates.TemplateResponse(
+        request,
+        'admin_web_admins.html',
+        {
+            'current_page': 'web_admins',
+            'admins': admins,
+            'admins_total': len(admins),
+            'active_supers': active_supers,
+            'roles': [r.value for r in WebAdminRole],
+            'min_password_length': MIN_PLAINTEXT_PASSWORD_LENGTH,
+            'capability_matrix': _ROLE_CAPABILITY_MATRIX,
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+@router.post('/admin/web-admins/', dependencies=[Depends(require_superadmin)])
+async def admin_web_admins_create(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    role: str = Form(...),
+    notes: str = Form(default=''),
+    is_active: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/web-admins/'
+
+    normalized_username = (username or '').strip()
+    if not normalized_username:
+        return _redirect_with_message(redirect, error='Username обязателен')
+    if len(password or '') < MIN_PLAINTEXT_PASSWORD_LENGTH:
+        return _redirect_with_message(
+            redirect,
+            error=f'Пароль должен быть длиной не менее {MIN_PLAINTEXT_PASSWORD_LENGTH} символов',
+        )
+    try:
+        role_value = _parse_web_admin_role(role)
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+
+    async with sessionmaker.begin() as session:
+        repo = WebAdminUserRepository(session)
+        if await repo.get_by_username(normalized_username) is not None:
+            return _redirect_with_message(redirect, error=f'Пользователь «{normalized_username}» уже существует')
+        try:
+            row = await repo.create(
+                username=normalized_username,
+                password_hash=hash_password(password),
+                role=role_value,
+                is_active=bool(is_active),
+                notes=notes,
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.web_admin_action,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='web_admin_user',
+            entity_id=str(row.id),
+            details={
+                'op': 'create',
+                'target_username': row.username,
+                'role': row.role.value,
+                'is_active': row.is_active,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Веб-админ «{normalized_username}» создан')
+
+
+@router.post('/admin/web-admins/{admin_id}', dependencies=[Depends(require_superadmin)])
+async def admin_web_admins_update(
+    request: Request,
+    admin_id: int,
+    role: str = Form(...),
+    notes: str = Form(default=''),
+    is_active: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/web-admins/'
+    try:
+        new_role = _parse_web_admin_role(role)
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+
+    async with sessionmaker.begin() as session:
+        repo = WebAdminUserRepository(session)
+        row = await repo.get_by_id(admin_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='Веб-админ не найден')
+
+        new_active = bool(is_active)
+        is_self = row.username.lower() == principal.username.lower()
+        if is_self and not new_active:
+            return _redirect_with_message(redirect, error='Нельзя деактивировать самого себя')
+        if is_self and new_role != WebAdminRole.superadmin:
+            return _redirect_with_message(redirect, error='Нельзя понизить роль самому себе')
+
+        # Защита: должен оставаться хотя бы один активный superadmin.
+        if (
+            row.role == WebAdminRole.superadmin
+            and (new_role != WebAdminRole.superadmin or not new_active)
+        ):
+            active_supers = await repo.count_active_by_role(WebAdminRole.superadmin)
+            currently_active_super = row.is_active
+            remaining = active_supers - (1 if currently_active_super else 0)
+            if remaining < 1:
+                return _redirect_with_message(
+                    redirect,
+                    error='Нельзя оставить систему без активного superadmin',
+                )
+
+        old_role = row.role
+        old_active = row.is_active
+        await repo.update_role(row, new_role)
+        await repo.set_active(row, active=new_active)
+        await repo.update_notes(row, notes)
+        await AuditLogRepository(session).create(
+            action=AuditAction.web_admin_action,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='web_admin_user',
+            entity_id=str(row.id),
+            details={
+                'op': 'update',
+                'target_username': row.username,
+                'old_role': old_role.value,
+                'new_role': row.role.value,
+                'old_active': old_active,
+                'new_active': row.is_active,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Веб-админ «{row.username}» обновлён')
+
+
+@router.post('/admin/web-admins/{admin_id}/password', dependencies=[Depends(require_superadmin)])
+async def admin_web_admins_change_password(
+    request: Request,
+    admin_id: int,
+    password: str = Form(...),
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/web-admins/'
+    if len(password or '') < MIN_PLAINTEXT_PASSWORD_LENGTH:
+        return _redirect_with_message(
+            redirect,
+            error=f'Пароль должен быть длиной не менее {MIN_PLAINTEXT_PASSWORD_LENGTH} символов',
+        )
+
+    async with sessionmaker.begin() as session:
+        repo = WebAdminUserRepository(session)
+        row = await repo.get_by_id(admin_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='Веб-админ не найден')
+        await repo.update_password(row, hash_password(password))
+        await AuditLogRepository(session).create(
+            action=AuditAction.web_admin_action,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='web_admin_user',
+            entity_id=str(row.id),
+            details={
+                'op': 'password_changed',
+                'target_username': row.username,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Пароль для «{row.username}» обновлён')
+
+
+@router.post('/admin/web-admins/{admin_id}/delete', dependencies=[Depends(require_superadmin)])
+async def admin_web_admins_delete(
+    request: Request,
+    admin_id: int,
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/web-admins/'
+    async with sessionmaker.begin() as session:
+        repo = WebAdminUserRepository(session)
+        row = await repo.get_by_id(admin_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='Веб-админ не найден')
+        if row.username.lower() == principal.username.lower():
+            return _redirect_with_message(redirect, error='Нельзя удалить самого себя')
+
+        if row.role == WebAdminRole.superadmin and row.is_active:
+            active_supers = await repo.count_active_by_role(WebAdminRole.superadmin)
+            if active_supers <= 1:
+                return _redirect_with_message(
+                    redirect,
+                    error='Нельзя удалить последнего активного superadmin',
+                )
+
+        username = row.username
+        role_value = row.role.value
+        await repo.delete(row)
+        await AuditLogRepository(session).create(
+            action=AuditAction.web_admin_action,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='web_admin_user',
+            entity_id=str(admin_id),
+            details={
+                'op': 'delete',
+                'target_username': username,
+                'role': role_value,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Веб-админ «{username}» удалён')
+
+
+@router.get('/admin/whoami', response_class=HTMLResponse, dependencies=[Depends(require_any)])
+async def admin_whoami(
+    request: Request,
+    principal: WebAdminPrincipal = Depends(require_any),
+):
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        'admin_whoami.html',
+        {
+            'current_page': 'whoami',
+            'principal_username': principal.username,
+            'principal_role': principal.role.value,
+            'is_legacy': principal.is_legacy,
+            'capability_matrix': _ROLE_CAPABILITY_MATRIX,
+        },
+    )
 
 
 @router.get('/admin/tickets/', response_class=HTMLResponse, dependencies=[Depends(require_any)])

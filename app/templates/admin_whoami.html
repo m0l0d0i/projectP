@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Кто я{% endblock %}
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Кто я</div>
+      <h1 class="mt-4 text-3xl font-bold text-white">{{ principal_username }}</h1>
+      <p class="mt-2 text-slate-400">
+        Текущая RBAC-роль: <span class="text-slate-200">{{ principal_role }}</span>{% if is_legacy %} <span class="ml-2 inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-200">env-fallback</span>{% endif %}.
+      </p>
+    </div>
+    <a href="/admin/system/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">← На главную</a>
+  </div>
+
+  {% if is_legacy %}
+  <div class="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+    ⚠️ Вы залогинены через legacy env-credentials (WEB_ADMIN_USERNAME/PASSWORD). Создайте запись в
+    <a class="underline" href="/admin/web-admins/">/admin/web-admins/</a> и снимите env-пароль после миграции.
+  </div>
+  {% endif %}
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <h2 class="text-xl font-semibold text-white">Что мне доступно</h2>
+    <div class="mt-4 overflow-x-auto">
+      <table class="w-full text-sm text-slate-200">
+        <thead class="text-xs uppercase tracking-wider text-slate-500">
+          <tr class="border-b border-slate-800">
+            <th class="px-3 py-2 text-left">Раздел</th>
+            <th class="px-3 py-2 text-left">Доступ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for label, perms in capability_matrix %}
+          <tr class="border-b border-slate-900">
+            <td class="px-3 py-2">{{ label }}</td>
+            <td class="px-3 py-2 {% if perms.get(principal_role) %}text-emerald-300{% else %}text-slate-500{% endif %}">
+              {% if perms.get(principal_role) %}✅ да{% else %}— нет{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

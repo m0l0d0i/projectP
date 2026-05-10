@@ -81,7 +81,10 @@
   - README в `deploy/provision/README.md` с шагами ручного провижнинга.
   - Полная реализация — после выбора провайдера и закрытия P0/P1.
 - [ ] **FEA-C37 (S, P2).** Outgoing webhooks: `subscription.created/paid/expired/refunded` → URL с HMAC.
-- [ ] **FEA-C39 (M, P1).** Per-admin RBAC. Сегодня бинарный `require_web_admin`. Роли: `superadmin/support/finance/readonly`. Необходимо для команды >1 человека.
+- [x] **FEA-C39 (M, P1).** Per-admin RBAC — закрыто Sprint 3.
+  - Миграция 30: `web_admin_users` (id/username/password_hash/role enum `superadmin|finance|support|readonly`/is_active/last_login_at/notes) + `audit_logs.actor_username` (web-админ может не иметь tg_id). `WebAdminUserRepository` (CRUD, case-insensitive lookup, count_active_by_role, touch_last_login). `app/web/auth.py`: `WebAdminPrincipal`, `authenticate_web_admin` (DB → fallback на env-credentials с ролью=superadmin и `is_legacy=True`), `require_role(*roles)` Depends-factory + алиасы (`require_superadmin/finance/support/finance_or_support/any`). `bootstrap_web_admin_from_env` на startup создаёт superadmin-запись из env, если её нет.
+  - Миграция 31: `audit_action += web_admin_action`. Каждое успешное mutation-действие через RBAC-gate пишется в `audit_logs` с `actor_username`/role/method/path/client_ip. GET'ы не логируем. Матрица ролей (см. `_ROLE_CAPABILITY_MATRIX` в `routes.py`): finance — pricing/promocodes/upsells/invoices/balance; support — tickets.close/broadcasts/notifications; superadmin-only — people/trial/antispam/rules/links/marzban-page/marzban-ops/nodes/routing-profiles; readonly — только GET.
+  - `/admin/web-admins/` (superadmin-only): CRUD + смена пароля + матрица прав. Защита: нельзя деактивировать/удалить себя, нельзя оставить систему без активного superadmin. `/admin/whoami` (любая роль): текущий username/role/is_legacy + список разрешённых разделов — диагностика для команды.
 
 ## D. Reliability / Ops
 
