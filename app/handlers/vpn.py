@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+from datetime import datetime, timezone
 from decimal import Decimal
 from urllib.parse import urlparse
 
@@ -21,6 +22,7 @@ from app.keyboards.inline import (
     TrialCallback,
     VpnCallback,
     active_vpn_keyboard,
+    add_device_confirm_keyboard,
     device_keyboard,
     device_mode_keyboard,
     device_os_keyboard,
@@ -160,6 +162,34 @@ def _trial_details_keyboard(subscription_id: int) -> InlineKeyboardMarkup:
 
 def _is_unlimited_subscription(subscription: Subscription) -> bool:
     return getattr(subscription, 'monthly_traffic_bytes', None) in (None, 0)
+
+
+async def _can_add_device(session: AsyncSession, subscription: Subscription) -> bool:
+    """FEA-A9: показывать кнопку «➕ Добавить устройство» в карточке подписки.
+
+    Условия: фича включена в AppSettings, подписка живая и не trial,
+    режим устройств позволяет инкремент (`single`/`custom`), есть запас
+    до MAX_CUSTOM_DEVICES, expire_date в будущем (иначе proration = 0).
+    """
+    if subscription.is_trial:
+        return False
+    mode = (subscription.used_device_mode or '').strip().lower()
+    if mode == 'unlimited':
+        return False
+    existing = 1 if mode == 'single' else int(subscription.used_device_count or 0)
+    if existing + 1 > PricingService.MAX_CUSTOM_DEVICES:
+        return False
+    expire_at = getattr(subscription, 'expire_date', None)
+    if expire_at is None:
+        return False
+    if expire_at.tzinfo is None:
+        expire_at = expire_at.replace(tzinfo=timezone.utc)
+    if expire_at <= datetime.now(timezone.utc):
+        return False
+    app_settings = await AppSettingsRepository(session).get()
+    if app_settings is None:
+        return False
+    return bool(getattr(app_settings, 'mid_cycle_device_topup_enabled', False))
 
 
 def _unlimited_details_keyboard(subscription_id: int) -> InlineKeyboardMarkup:
@@ -379,6 +409,10 @@ async def _details_screen(
         extra_block = '\n\n♾️ <b>Безлимитный тариф</b>\nДокупка трафика для этого тарифа не требуется и недоступна.'
         keyboard = _unlimited_details_keyboard(subscription.id)
     else:
+        keyboard = vpn_details_keyboard(
+            subscription.id,
+            can_add_device=await _can_add_device(session, subscription),
+        )
         traffic_lines = [
             f'Базовый трафик цикла: {view["cycle_base_label"]}',
             f'Использованный трафик: {view["used_label"]}',

@@ -22,6 +22,8 @@ from app.keyboards.inline import (
     MonthsCallback,
     TopUpCallback,
     TrafficPackageCallback,
+    VpnCallback,
+    add_device_confirm_keyboard,
     balance_topup_keyboard,
     device_count_keyboard,
     device_mode_keyboard,
@@ -312,10 +314,56 @@ def render_invoice_text(invoice: Invoice, user_balance: Decimal) -> str:
             f'{balance_hint}'
         )
 
+    if invoice.purpose == InvoicePurpose.device_topup:
+        previous_count = int(payload.get('previous_device_count') or 0)
+        new_count = int(payload.get('new_device_count') or 0)
+        cycle_end_at = _parse_payload_datetime(payload.get('traffic_cycle_end_at'))
+        price_mode = (payload.get('price_mode') or 'prorated').strip().lower()
+        mode_label = 'фиксированная цена' if price_mode == 'fixed' else 'пропорционально оставшимся дням'
+        cycle_line = (
+            f'📅 <b>Действует до конца текущего цикла:</b> {format_dt(cycle_end_at)}'
+            if cycle_end_at is not None
+            else '📅 <b>Действует:</b> только до конца текущего расчетного периода'
+        )
+        return (
+            '➕ <b>Добавление устройства</b>\n\n'
+            f'📱 <b>Лимит устройств:</b> {previous_count} → {new_count}\n'
+            f'{cycle_line}\n'
+            f'💸 <b>Расчёт:</b> {mode_label}\n\n'
+            f'💳 <b>Стоимость:</b> {total} ₽\n'
+            f'🧾 <b>К оплате:</b> {payable} ₽'
+        )
+
     return (
         '💳 <b>Пополнение баланса</b>\n\n'
         f'💰 <b>Сумма пополнения:</b> {total} ₽\n'
         f'🧾 <b>К оплате:</b> {payable} ₽'
+    )
+
+
+def _render_device_topup_preview(quote, expire_at: datetime | None) -> str:
+    mode_label = (
+        'фиксированная цена' if quote.mode == 'fixed' else 'пропорционально оставшимся дням'
+    )
+    cycle_line = (
+        f'📅 <b>Действует до:</b> {format_dt(expire_at)}'
+        if expire_at is not None
+        else '📅 <b>Действует:</b> до конца текущего расчетного периода'
+    )
+    days_line = ''
+    if quote.mode == 'prorated':
+        days_line = (
+            f'\n📊 <b>Дни до конца цикла:</b> {quote.days_left} из {quote.days_in_cycle} '
+            f'(месячная цена {money(quote.monthly_extra_device_price)} ₽/устройство)'
+        )
+    return (
+        '➕ <b>Добавление устройства</b>\n\n'
+        f'📱 <b>Лимит устройств:</b> {quote.current_device_count} → {quote.new_device_count}\n'
+        f'{cycle_line}\n'
+        f'💸 <b>Расчёт:</b> {mode_label}{days_line}\n\n'
+        f'💳 <b>Стоимость:</b> {money(quote.price)} ₽\n\n'
+        '⚠️ Лимит подключений увеличится сразу и действует до конца текущего срока подписки. '
+        'При продлении тарифа количество устройств возьмётся из выбранного варианта.'
     )
 
 
@@ -818,6 +866,76 @@ async def buy_topup(
     await safe_callback_answer(callback, 'Счет подготовлен')
 
 
+@router.callback_query(VpnCallback.filter(F.action == 'add_device'))
+async def show_add_device_preview(
+    callback: CallbackQuery,
+    callback_data: VpnCallback,
+    session: AsyncSession,
+    settings: Settings,
+    marzban: MarzbanClient,
+    payments: PaymentProvider,
+) -> None:
+    user = await get_or_create_user(callback, session)
+    service = await _payment_service(session, settings, marzban, payments)
+    try:
+        subscription, quote = await service.quote_device_topup(
+            user=user,
+            subscription_id=callback_data.subscription_id or None,
+        )
+    except ValueError as exc:
+        await safe_callback_answer(callback, str(exc), show_alert=True)
+        return
+
+    expire_at = subscription.traffic_cycle_end_at or subscription.expire_date
+    await safe_edit_message_text(
+        callback.message,
+        _render_device_topup_preview(quote, expire_at),
+        reply_markup=add_device_confirm_keyboard(subscription.id, quote.price),
+    )
+    await safe_callback_answer(callback, 'Проверьте стоимость и подтвердите')
+
+
+@router.callback_query(VpnCallback.filter(F.action == 'add_device_confirm'))
+async def confirm_add_device(
+    callback: CallbackQuery,
+    callback_data: VpnCallback,
+    session: AsyncSession,
+    settings: Settings,
+    marzban: MarzbanClient,
+    payments: PaymentProvider,
+) -> None:
+    user = await get_or_create_user(callback, session)
+    service = await _payment_service(session, settings, marzban, payments)
+    try:
+        invoice = await service.create_device_topup_invoice(
+            user=user,
+            subscription_id=callback_data.subscription_id or None,
+        )
+        await session.commit()
+    except DuplicateInvoiceError as exc:
+        await _handle_duplicate_invoice(
+            callback,
+            action='create_device_topup_invoice',
+            user_tg_id=callback.from_user.id if callback.from_user else None,
+            exc=exc,
+        )
+        return
+    except PaymentProviderError as exc:
+        await _handle_payment_provider_error(callback, action='create_device_topup_invoice', exc=exc)
+        return
+    except ValueError as exc:
+        await safe_callback_answer(callback, str(exc), show_alert=True)
+        return
+
+    await safe_edit_message_text(
+        callback.message,
+        render_invoice_text(invoice, user.balance),
+        reply_markup=invoice_cart_keyboard(invoice, user.balance),
+        disable_web_page_preview=True,
+    )
+    await safe_callback_answer(callback, 'Счет подготовлен')
+
+
 @router.callback_query(InvoiceActionCallback.filter(F.action == 'toggle_balance'))
 async def toggle_balance(
     callback: CallbackQuery,
@@ -878,6 +996,14 @@ async def confirm_invoice(
         await callback.message.answer(
             '✅ Оплата подтверждена. Дополнительный трафик начислен только на текущий расчетный период.'
         )
+    elif result.invoice.purpose == InvoicePurpose.device_topup:
+        new_count = int((result.invoice.payload_json or {}).get('new_device_count') or 0)
+        if new_count:
+            await callback.message.answer(
+                f'✅ Оплата подтверждена. Лимит устройств увеличен до {new_count}.'
+            )
+        else:
+            await callback.message.answer('✅ Оплата подтверждена. Лимит устройств увеличен.')
     else:
         await callback.message.answer('✅ Баланс успешно пополнен.')
 

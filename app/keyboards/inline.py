@@ -176,7 +176,12 @@ def active_vpn_keyboard(subscription_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def vpn_details_keyboard(subscription_id: int, *, is_trial: bool = False) -> InlineKeyboardMarkup:
+def vpn_details_keyboard(
+    subscription_id: int,
+    *,
+    is_trial: bool = False,
+    can_add_device: bool = False,
+) -> InlineKeyboardMarkup:
     if is_trial:
         return trial_vpn_details_keyboard(subscription_id)
 
@@ -185,9 +190,38 @@ def vpn_details_keyboard(subscription_id: int, *, is_trial: bool = False) -> Inl
         [InlineKeyboardButton(text='⏳ Продлить подписку', callback_data=VpnCallback(action='renew', subscription_id=subscription_id).pack())],
         [InlineKeyboardButton(text='🔄 Сбросить трафик', callback_data=VpnCallback(action='reset_traffic', subscription_id=subscription_id).pack())],
         [InlineKeyboardButton(text='📦 Докупить трафик', callback_data=VpnCallback(action='topup', subscription_id=subscription_id).pack())],
-        [InlineKeyboardButton(text='⬅️ Назад', callback_data=VpnCallback(action='services').pack())],
     ]
+    if can_add_device:
+        rows.append([
+            InlineKeyboardButton(
+                text='➕ Добавить устройство',
+                callback_data=VpnCallback(action='add_device', subscription_id=subscription_id).pack(),
+            )
+        ])
+    rows.append(
+        [InlineKeyboardButton(text='⬅️ Назад', callback_data=VpnCallback(action='services').pack())]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def add_device_confirm_keyboard(subscription_id: int, price: Decimal | int | float | str) -> InlineKeyboardMarkup:
+    price_label = _format_money_label(price)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f'✅ Подтвердить за {price_label} ₽',
+                    callback_data=VpnCallback(action='add_device_confirm', subscription_id=subscription_id).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text='⬅️ Отмена',
+                    callback_data=VpnCallback(action='details', subscription_id=subscription_id).pack(),
+                )
+            ],
+        ]
+    )
 
 
 def trial_vpn_details_keyboard(subscription_id: int) -> InlineKeyboardMarkup:
