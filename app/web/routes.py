@@ -34,6 +34,7 @@ from app.db.models import (
     AuditLog,
     BroadcastJobStatus,
     InvoiceStatus,
+    LLMProviderKind,
     NodeHealthStatus,
     NodeSourceStatus,
     NodeSyncState,
@@ -49,6 +50,7 @@ from app.db.repositories import (
     BroadcastJobRepository,
     CannedResponseRepository,
     InvoiceRepository,
+    LLMConfigRepository,
     MarzbanPageSettingsRepository,
     NotificationRuleRepository,
     PricingRuleRepository,
@@ -79,6 +81,15 @@ from app.services.promos import PromoService
 from app.services.routing_profiles import RoutingProfilesService, RoutingProfileValidationError
 from app.services.subscription_urls import build_canonical_subscription_url, configured_public_subscription_origin
 from app.services.subscriptions import SubscriptionService
+from app.services.support_ai import (
+    DEEPSEEK_DEFAULT_API_BASE_URL,
+    LLMProviderError,
+    LLMSecretsKeyError,
+    build_provider,
+    decrypt_api_key,
+    encrypt_api_key,
+    mask_api_key_preview,
+)
 from app.services.tariffs import PricingService
 from app.observability.metrics import notification_counters_snapshot
 from app.utils.formatters import DISPLAY_TIMEZONE, bytes_to_gb, format_dt
@@ -4991,6 +5002,388 @@ async def admin_referrals_update(
             },
         )
     return _redirect_with_message(redirect, success='Бонусы реферальной программы обновлены')
+
+
+# --- Support-AI (LLM-провайдеры) (FEA-C32 #2) -------------------------------
+
+_LLM_PROVIDER_LABELS: dict[str, str] = {
+    LLMProviderKind.deepseek.value: 'DeepSeek',
+    LLMProviderKind.openai_compat.value: 'OpenAI-совместимый',
+}
+
+
+def _llm_config_view(row) -> dict[str, Any]:
+    """Безопасное представление LLMConfig для шаблона.
+
+    api_key никогда не передаётся в шаблон в plain виде — только preview.
+    Декрипт делается лениво и только при показе превью; ошибки декрипта
+    превращаются в пометку «(ключ недоступен)», чтобы UI не падал.
+    """
+    try:
+        plain_key = decrypt_api_key(row.api_key_encrypted)
+    except LLMSecretsKeyError:
+        plain_key = None
+    api_key_preview = (
+        mask_api_key_preview(plain_key) if plain_key else '⚠️ ключ недоступен'
+    )
+    return {
+        'id': row.id,
+        'title': row.title,
+        'provider': row.provider.value if hasattr(row.provider, 'value') else str(row.provider),
+        'provider_label': _LLM_PROVIDER_LABELS.get(
+            row.provider.value if hasattr(row.provider, 'value') else str(row.provider),
+            str(row.provider),
+        ),
+        'api_base_url': row.api_base_url,
+        'model_name': row.model_name,
+        'system_prompt': row.system_prompt,
+        'temperature': row.temperature,
+        'max_tokens': row.max_tokens,
+        'api_key_preview': api_key_preview,
+        'is_active': row.is_active,
+        'usage_total_calls': row.usage_total_calls,
+        'usage_total_input_tokens': row.usage_total_input_tokens,
+        'usage_total_output_tokens': row.usage_total_output_tokens,
+        'last_test_status': row.last_test_status,
+        'last_test_error': row.last_test_error,
+        'last_test_at': row.last_test_at,
+        'created_at': row.created_at,
+        'updated_at': row.updated_at,
+    }
+
+
+_LLM_DEFAULT_SYSTEM_PROMPT = (
+    'Ты — оператор саппорта VPN-сервиса SwoiVPN. Отвечай по-русски, '
+    'кратко (3–8 предложений), вежливо и по делу. Используй маркеры '
+    'списка только когда это упрощает чтение инструкции. Никогда не '
+    'выдумывай факты о подписке пользователя — если данных недостаточно, '
+    'попроси уточнения. Не упоминай, что ты ИИ.'
+)
+
+
+def _normalize_llm_provider(value: str | None) -> LLMProviderKind:
+    normalized = (value or '').strip().lower()
+    try:
+        return LLMProviderKind(normalized)
+    except ValueError as exc:
+        raise ValueError(f'Неизвестный провайдер: {value!r}') from exc
+
+
+@router.get('/admin/support-ai/', response_class=HTMLResponse, dependencies=[Depends(require_superadmin)])
+async def admin_support_ai(request: Request):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+    async with sessionmaker() as session:
+        rows = await LLMConfigRepository(session).list_all()
+    items = [_llm_config_view(r) for r in rows]
+    return templates.TemplateResponse(
+        request,
+        'admin_support_ai.html',
+        {
+            'current_page': 'support_ai',
+            'items': items,
+            'total': len(items),
+            'active_total': sum(1 for it in items if it['is_active']),
+            'providers': [
+                (kind.value, _LLM_PROVIDER_LABELS[kind.value]) for kind in LLMProviderKind
+            ],
+            'default_deepseek_url': DEEPSEEK_DEFAULT_API_BASE_URL,
+            'default_system_prompt': _LLM_DEFAULT_SYSTEM_PROMPT,
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+@router.post('/admin/support-ai/', dependencies=[Depends(require_superadmin)])
+async def admin_support_ai_create(
+    request: Request,
+    title: str = Form(...),
+    provider: str = Form(...),
+    api_base_url: str = Form(...),
+    model_name: str = Form(...),
+    system_prompt: str = Form(...),
+    api_key: str = Form(...),
+    temperature: str = Form(default='0.30'),
+    max_tokens: int = Form(default=1024),
+    is_active: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/support-ai/'
+    try:
+        provider_kind = _normalize_llm_provider(provider)
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+    try:
+        encrypted = encrypt_api_key(api_key.strip())
+    except (ValueError, LLMSecretsKeyError) as exc:
+        return _redirect_with_message(redirect, error=f'api_key: {exc}')
+
+    async with sessionmaker.begin() as session:
+        repo = LLMConfigRepository(session)
+        try:
+            row = await repo.create(
+                title=title,
+                provider=provider_kind,
+                api_base_url=api_base_url,
+                model_name=model_name,
+                system_prompt=system_prompt,
+                api_key_encrypted=encrypted,
+                temperature=temperature.replace(',', '.'),
+                max_tokens=max_tokens,
+                is_active=bool(is_active),
+                created_by_admin_id=principal.db_id,
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.llm_config_created,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='llm_config',
+            entity_id=str(row.id),
+            details={
+                'title': row.title,
+                'provider': row.provider.value,
+                'model_name': row.model_name,
+                'is_active': row.is_active,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'LLM-конфиг «{row.title}» создан')
+
+
+@router.post('/admin/support-ai/{config_id}', dependencies=[Depends(require_superadmin)])
+async def admin_support_ai_update(
+    request: Request,
+    config_id: int,
+    title: str = Form(...),
+    provider: str = Form(...),
+    api_base_url: str = Form(...),
+    model_name: str = Form(...),
+    system_prompt: str = Form(...),
+    temperature: str = Form(default='0.30'),
+    max_tokens: int = Form(default=1024),
+    api_key: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/support-ai/'
+    try:
+        provider_kind = _normalize_llm_provider(provider)
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+
+    new_encrypted: str | None = None
+    if api_key.strip():
+        try:
+            new_encrypted = encrypt_api_key(api_key.strip())
+        except (ValueError, LLMSecretsKeyError) as exc:
+            return _redirect_with_message(redirect, error=f'api_key: {exc}')
+
+    async with sessionmaker.begin() as session:
+        repo = LLMConfigRepository(session)
+        row = await repo.get_by_id(config_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='LLM-конфиг не найден')
+        try:
+            await repo.update(
+                row,
+                title=title,
+                provider=provider_kind,
+                api_base_url=api_base_url,
+                model_name=model_name,
+                system_prompt=system_prompt,
+                temperature=temperature.replace(',', '.'),
+                max_tokens=max_tokens,
+                api_key_encrypted=new_encrypted,
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.llm_config_updated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='llm_config',
+            entity_id=str(row.id),
+            details={
+                'title': row.title,
+                'provider': row.provider.value,
+                'model_name': row.model_name,
+                'api_key_rotated': new_encrypted is not None,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'LLM-конфиг «{row.title}» обновлён')
+
+
+@router.post('/admin/support-ai/{config_id}/activate', dependencies=[Depends(require_superadmin)])
+async def admin_support_ai_activate(
+    request: Request,
+    config_id: int,
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/support-ai/'
+    async with sessionmaker.begin() as session:
+        repo = LLMConfigRepository(session)
+        row = await repo.get_by_id(config_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='LLM-конфиг не найден')
+        if row.is_active:
+            await repo.deactivate_all()
+            await AuditLogRepository(session).create(
+                action=AuditAction.llm_config_updated,
+                actor_type=AuditActorType.admin,
+                actor_tg_id=None,
+                actor_username=principal.username,
+                entity_type='llm_config',
+                entity_id=str(row.id),
+                details={'is_active': False, 'reason': 'manual_deactivate'},
+            )
+            return _redirect_with_message(redirect, success=f'LLM-конфиг «{row.title}» деактивирован')
+        await repo.set_active(row)
+        await AuditLogRepository(session).create(
+            action=AuditAction.llm_config_updated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='llm_config',
+            entity_id=str(row.id),
+            details={'is_active': True, 'title': row.title, 'reason': 'manual_activate'},
+        )
+    return _redirect_with_message(redirect, success=f'Активный LLM — «{row.title}»')
+
+
+@router.post('/admin/support-ai/{config_id}/test', dependencies=[Depends(require_superadmin)])
+async def admin_support_ai_test(
+    request: Request,
+    config_id: int,
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    """Тест соединения с LLM. Отправляет короткий ping-prompt, обновляет
+    `last_test_*` поля и пишет audit. Не списывает usage_total_* (это
+    диагностика, не реальная генерация ответа).
+    """
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/support-ai/'
+
+    async with sessionmaker() as session:
+        row = await LLMConfigRepository(session).get_by_id(config_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='LLM-конфиг не найден')
+        try:
+            provider = build_provider(row)
+        except LLMSecretsKeyError as exc:
+            await _record_test_failure(sessionmaker, config_id, str(exc), principal)
+            return _redirect_with_message(redirect, error=f'Ключ: {exc}')
+        title = row.title
+        provider_value = row.provider.value
+        model_name = row.model_name
+
+    try:
+        response = await provider.complete(
+            messages=[
+                {'role': 'system', 'content': 'You are a connectivity check. Respond with exactly: pong'},
+                {'role': 'user', 'content': 'ping'},
+            ],
+            temperature=0.0,
+            max_tokens=8,
+            timeout_seconds=15.0,
+        )
+    except LLMProviderError as exc:
+        error_msg = exc.provider_message or str(exc)
+        if exc.status_code:
+            error_msg = f'HTTP {exc.status_code}: {error_msg}'
+        await _record_test_failure(sessionmaker, config_id, error_msg, principal)
+        return _redirect_with_message(redirect, error=f'Тест не пройден: {error_msg[:200]}')
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('LLM test unexpected error config_id=%s', config_id)
+        await _record_test_failure(sessionmaker, config_id, repr(exc), principal)
+        return _redirect_with_message(redirect, error=f'Тест не пройден: {exc}')
+
+    async with sessionmaker.begin() as session:
+        repo = LLMConfigRepository(session)
+        row = await repo.get_by_id(config_id)
+        if row is not None:
+            await repo.record_test_result(row, status='ok', error=None)
+        await AuditLogRepository(session).create(
+            action=AuditAction.llm_config_test_run,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='llm_config',
+            entity_id=str(config_id),
+            details={
+                'status': 'ok',
+                'provider': provider_value,
+                'model': response.model,
+                'tokens_in': response.tokens_in,
+                'tokens_out': response.tokens_out,
+                'latency_ms': response.latency_ms,
+            },
+        )
+    return _redirect_with_message(
+        redirect,
+        success=(
+            f'Тест «{title}» пройден: {response.model} · '
+            f'tokens {response.tokens_in}+{response.tokens_out} · '
+            f'{response.latency_ms} мс. Ответ: {response.text[:80]!r}'
+        ),
+    )
+
+
+async def _record_test_failure(
+    sessionmaker,
+    config_id: int,
+    error: str,
+    principal: WebAdminPrincipal,
+) -> None:
+    """Записать неуспешный тест в last_test_* + audit. Свопает свою
+    транзакцию, чтобы вызывающий код мог использовать sessionmaker дальше.
+    """
+    async with sessionmaker.begin() as session:
+        repo = LLMConfigRepository(session)
+        row = await repo.get_by_id(config_id)
+        if row is not None:
+            await repo.record_test_result(row, status='error', error=error)
+        await AuditLogRepository(session).create(
+            action=AuditAction.llm_config_test_run,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='llm_config',
+            entity_id=str(config_id),
+            details={'status': 'error', 'error': error[:500]},
+        )
+
+
+@router.post('/admin/support-ai/{config_id}/delete', dependencies=[Depends(require_superadmin)])
+async def admin_support_ai_delete(
+    request: Request,
+    config_id: int,
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/support-ai/'
+    async with sessionmaker.begin() as session:
+        repo = LLMConfigRepository(session)
+        row = await repo.get_by_id(config_id)
+        if row is None:
+            return _redirect_with_message(redirect, error='LLM-конфиг не найден')
+        title = row.title
+        await repo.delete(row)
+        await AuditLogRepository(session).create(
+            action=AuditAction.llm_config_deleted,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='llm_config',
+            entity_id=str(config_id),
+            details={'title': title},
+        )
+    return _redirect_with_message(redirect, success=f'LLM-конфиг «{title}» удалён')
 
 
 @router.get('/admin/promocodes/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
