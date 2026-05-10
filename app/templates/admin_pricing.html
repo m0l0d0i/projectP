@@ -551,6 +551,64 @@
                 </div>
               {% endif %}
 
+              {# FEA-ADMIN-TARIFF-PLUS: visibility / окна / сегменты / private-link #}
+              <details class="mt-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <summary class="cursor-pointer text-sm font-semibold text-slate-200">
+                  🔒 Видимость: <code class="text-violet-300">{{ tariff.visibility }}</code>
+                  {% if tariff.is_recommended %}<span class="ml-1 inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">recommended</span>{% endif %}
+                  {% if tariff.max_active_subscriptions %}<span class="ml-1 inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300">cap: {{ tariff.max_active_subscriptions }}</span>{% endif %}
+                  {% if tariff.available_from_iso or tariff.available_to_iso %}<span class="ml-1 inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-300">window</span>{% endif %}
+                  {% if tariff.private_token %}<span class="ml-1 inline-flex rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-300">private-link</span>{% endif %}
+                </summary>
+                <form method="post" action="/admin/pricing/tariff/{{ tariff.id }}/visibility" class="mt-3 grid gap-3 sm:grid-cols-2">
+                  {{ csrf_input(request)|safe }}
+                  <label class="flex flex-col gap-1 text-xs text-slate-400">
+                    <span>Visibility</span>
+                    <select name="visibility" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+                      {% for value, label in visibility_options %}<option value="{{ value }}" {% if value == tariff.visibility %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                  </label>
+                  <label class="flex flex-col gap-1 text-xs text-slate-400">
+                    <span>Inventory cap (max активных подписок)</span>
+                    <input type="number" name="max_active_subscriptions" value="{{ tariff.max_active_subscriptions or '' }}" min="1" placeholder="без лимита" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+                  </label>
+                  <label class="flex flex-col gap-1 text-xs text-slate-400">
+                    <span>Available from (UTC)</span>
+                    <input type="datetime-local" name="available_from" value="{{ tariff.available_from_iso[:16] if tariff.available_from_iso else '' }}" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+                  </label>
+                  <label class="flex flex-col gap-1 text-xs text-slate-400">
+                    <span>Available to (UTC)</span>
+                    <input type="datetime-local" name="available_to" value="{{ tariff.available_to_iso[:16] if tariff.available_to_iso else '' }}" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+                  </label>
+                  <label class="flex flex-col gap-1 text-xs text-slate-400 sm:col-span-2">
+                    <span>Segment filter (JSON, ключи: <code>min_paid_invoices, paid_only, created_before, created_after, tags_any, tags_all</code>)</span>
+                    <textarea name="segment_filter_text" rows="3" placeholder='{"min_paid_invoices": 1, "tags_any": ["vip"]}' class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white">{{ tariff.segment_filter_text }}</textarea>
+                  </label>
+                  <label class="flex flex-col gap-1 text-xs text-slate-400">
+                    <span>Accent color (hex)</span>
+                    <input type="text" name="accent_color" value="{{ tariff.accent_color }}" maxlength="16" placeholder="#22d3ee" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+                  </label>
+                  <label class="flex items-center gap-2 text-sm text-slate-300 sm:mt-6">
+                    <input type="checkbox" name="is_recommended" value="1" {% if tariff.is_recommended %}checked{% endif %}>
+                    <span>Помечен как «рекомендованный»</span>
+                  </label>
+                  <div class="sm:col-span-2 rounded-2xl border border-slate-800 bg-slate-950 p-3">
+                    <div class="text-xs uppercase tracking-wider text-slate-500">Private deep-link</div>
+                    {% if tariff.private_token %}
+                      <div class="mt-2 break-all text-xs text-slate-200">https://t.me/{{ bot_username }}?start=tariff_{{ tariff.private_token }}</div>
+                    {% else %}
+                      <div class="mt-2 text-xs text-slate-500">Токен не сгенерирован.</div>
+                    {% endif %}
+                    <select name="private_token_action" class="mt-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white">
+                      <option value="">— не менять —</option>
+                      <option value="generate">Сгенерировать новый (старый перестанет работать)</option>
+                      <option value="clear">Очистить (deep-link отключить)</option>
+                    </select>
+                  </div>
+                  <button type="submit" class="rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-400 sm:col-span-2">Сохранить видимость</button>
+                </form>
+              </details>
+
               <div class="mt-4 flex flex-wrap gap-2">
                 <a href="/admin/pricing/?status={{ status_filter }}&edit_code={{ tariff.code }}" class="inline-flex rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" title="Открыть тариф в режиме редактирования">
                   Редактировать

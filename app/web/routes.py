@@ -40,6 +40,7 @@ from app.db.models import (
     NodeSourceStatus,
     NodeSyncState,
     SupportTicketStatus,
+    TariffVisibility,
     TransactionType,
     User,
     WebAdminRole,
@@ -84,6 +85,7 @@ from app.services.promos import PromoService
 from app.services.routing_profiles import RoutingProfilesService, RoutingProfileValidationError
 from app.services.subscription_urls import build_canonical_subscription_url, configured_public_subscription_origin
 from app.services.subscriptions import SubscriptionService
+from app.services.tariff_visibility import parse_segment_filter_text
 from app.services.support_ai import (
     DEEPSEEK_DEFAULT_API_BASE_URL,
     LLMProviderError,
@@ -2126,6 +2128,20 @@ def _tariff_admin_snapshot(plan, pricing) -> dict[str, object]:
         'status': status,
         'status_label': _tariff_status_label(status),
         'status_tone': _tariff_status_tone(status),
+        # FEA-ADMIN-TARIFF-PLUS: visibility/окна/сегменты/private-link
+        'visibility': str(getattr(getattr(plan, 'visibility', None), 'value', getattr(plan, 'visibility', 'public')) or 'public'),
+        'available_from_iso': (plan.available_from.isoformat() if getattr(plan, 'available_from', None) else ''),
+        'available_to_iso': (plan.available_to.isoformat() if getattr(plan, 'available_to', None) else ''),
+        'available_from_label': format_dt(getattr(plan, 'available_from', None)) or '—',
+        'available_to_label': format_dt(getattr(plan, 'available_to', None)) or '—',
+        'segment_filter_text': (
+            json.dumps(plan.segment_filter_json, ensure_ascii=False, indent=2)
+            if getattr(plan, 'segment_filter_json', None) else ''
+        ),
+        'private_token': getattr(plan, 'private_token', None) or '',
+        'accent_color': getattr(plan, 'accent_color', None) or '',
+        'is_recommended': bool(getattr(plan, 'is_recommended', False)),
+        'max_active_subscriptions': getattr(plan, 'max_active_subscriptions', None),
     }
 
 
@@ -3322,6 +3338,13 @@ async def admin_pricing(
             'edit_tariff': _tariff_admin_snapshot(edit_plan, pricing) if edit_plan is not None else None,
             'constructor_supported': all(callable(getattr(tariff_repo, name, None)) for name in ('create_plan', 'update_plan')),
             'preview_rows': preview_rows,
+            'visibility_options': [
+                ('public', 'Public · виден всем'),
+                ('code_only', 'Code-only · только при unlock через промокод/админа'),
+                ('segment_only', 'Segment-only · по DSL `segment_filter_json`'),
+                ('private_link', 'Private-link · только через deep-link/админский unlock'),
+            ],
+            'bot_username': request.app.state.settings.bot_username,
             'success_message': request.query_params.get('success'),
             'error_message': request.query_params.get('error'),
         },
@@ -3591,6 +3614,135 @@ async def admin_pricing_update(
         return _redirect_with_message('/admin/pricing/', error=str(exc))
 
     return _redirect_with_message('/admin/pricing/', error='Неизвестное действие')
+
+
+# --- FEA-ADMIN-TARIFF-PLUS: visibility / окна / сегменты ---------------------
+
+def _parse_iso_form_datetime(value: str | None, *, field_label: str) -> datetime | None:
+    raw = (value or '').strip()
+    if not raw:
+        return None
+    try:
+        # html5 datetime-local → 'YYYY-MM-DDTHH:MM' без таймзоны → читаем как UTC
+        parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except ValueError as exc:
+        raise ValueError(f'{field_label}: ожидается ISO-8601 datetime') from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+@router.post('/admin/pricing/tariff/{tariff_id}/visibility', dependencies=[Depends(require_finance)])
+async def admin_tariff_visibility_update(
+    request: Request,
+    tariff_id: int,
+    visibility: str = Form(...),
+    available_from: str = Form(default=''),
+    available_to: str = Form(default=''),
+    segment_filter_text: str = Form(default=''),
+    accent_color: str = Form(default=''),
+    is_recommended: str = Form(default=''),
+    max_active_subscriptions: str = Form(default=''),
+    private_token_action: str = Form(default=''),  # '', 'generate', 'clear'
+    principal: WebAdminPrincipal = Depends(require_finance),
+):
+    """Обновить visibility-поля тарифа (FEA-ADMIN-TARIFF-PLUS #2).
+
+    Отдельный POST на каждый тариф, чтобы не разрастать гигантский
+    `admin_pricing_update` ещё больше. Все поля валидируются и
+    нормализуются здесь; на стороне БД дополнительно работают CHECK
+    (`available_from <= available_to`, `max_active_subscriptions ≥ 1`).
+    """
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/pricing/'
+    normalized_visibility = (visibility or '').strip().lower()
+    try:
+        visibility_enum = TariffVisibility(normalized_visibility)
+    except ValueError:
+        return _redirect_with_message(redirect, error=f'Неизвестная visibility «{visibility}»')
+
+    try:
+        available_from_dt = _parse_iso_form_datetime(available_from, field_label='available_from')
+        available_to_dt = _parse_iso_form_datetime(available_to, field_label='available_to')
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+    if available_from_dt and available_to_dt and available_from_dt > available_to_dt:
+        return _redirect_with_message(redirect, error='available_from должен быть ≤ available_to')
+
+    try:
+        segment_payload = parse_segment_filter_text(segment_filter_text)
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+
+    accent = (accent_color or '').strip() or None
+    if accent and (len(accent) > 16 or not accent.startswith('#')):
+        return _redirect_with_message(redirect, error='accent_color: ожидается hex-цвет вида #RRGGBB')
+
+    cap_raw = (max_active_subscriptions or '').strip()
+    cap_value: int | None = None
+    if cap_raw:
+        try:
+            cap_value = int(cap_raw)
+        except ValueError:
+            return _redirect_with_message(redirect, error='max_active_subscriptions: ожидается целое число')
+        if cap_value < 1:
+            return _redirect_with_message(redirect, error='max_active_subscriptions: должен быть ≥ 1')
+
+    async with sessionmaker.begin() as session:
+        repo = TariffRepository(session)
+        plan = await repo.get_by_id_for_update(tariff_id)
+        if plan is None:
+            return _redirect_with_message(redirect, error='Тариф не найден')
+
+        before = {
+            'visibility': str(getattr(plan.visibility, 'value', plan.visibility)),
+            'available_from': plan.available_from.isoformat() if plan.available_from else None,
+            'available_to': plan.available_to.isoformat() if plan.available_to else None,
+            'segment_filter_json': plan.segment_filter_json,
+            'private_token_present': bool(plan.private_token),
+            'accent_color': plan.accent_color,
+            'is_recommended': plan.is_recommended,
+            'max_active_subscriptions': plan.max_active_subscriptions,
+        }
+
+        plan.visibility = visibility_enum
+        plan.available_from = available_from_dt
+        plan.available_to = available_to_dt
+        plan.segment_filter_json = segment_payload
+        plan.accent_color = accent
+        plan.is_recommended = bool(is_recommended)
+        plan.max_active_subscriptions = cap_value
+
+        action = (private_token_action or '').strip().lower()
+        if action == 'generate':
+            plan.private_token = secrets.token_urlsafe(24)
+        elif action == 'clear':
+            plan.private_token = None
+        # else: оставляем как было
+
+        await session.flush()
+        await AuditLogRepository(session).create(
+            action=AuditAction.tariff_visibility_updated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='tariff_plan',
+            entity_id=str(tariff_id),
+            details={
+                'before': before,
+                'after': {
+                    'visibility': plan.visibility.value,
+                    'available_from': plan.available_from.isoformat() if plan.available_from else None,
+                    'available_to': plan.available_to.isoformat() if plan.available_to else None,
+                    'segment_filter_json': plan.segment_filter_json,
+                    'private_token_present': bool(plan.private_token),
+                    'accent_color': plan.accent_color,
+                    'is_recommended': plan.is_recommended,
+                    'max_active_subscriptions': plan.max_active_subscriptions,
+                },
+                'private_token_action': action or None,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Видимость тарифа #{tariff_id} обновлена')
+
 
 @router.get('/admin/trial/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_trial(request: Request):
