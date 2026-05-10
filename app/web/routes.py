@@ -2568,7 +2568,9 @@ async def admin_user_detail(request: Request, user_id: int):
             traffic_label = f"{bytes_to_gb(monthly_traffic_bytes)} ГБ / мес."
         subscriptions.append(
             SimpleNamespace(
+                id=getattr(sub, 'id', None),
                 service_id=getattr(sub, 'service_id', '—'),
+                marzban_username=getattr(sub, 'marzban_username', None),
                 is_trial=bool(getattr(sub, 'is_trial', False)),
                 is_active=bool(getattr(sub, 'is_active', False)),
                 status_label='Активна' if bool(getattr(sub, 'is_active', False)) else 'Неактивна',
@@ -2609,6 +2611,16 @@ async def admin_user_detail(request: Request, user_id: int):
                 last_name=getattr(user, 'last_name', None),
                 balance=user.balance,
                 created_at=format_dt(getattr(user, 'created_at', None)),
+                admin_notes=getattr(user, 'admin_notes', None) or '',
+                tags=list(getattr(user, 'tags', None) or []),
+                is_blocked=bool(getattr(user, 'is_blocked', False)),
+                blocked_at=format_dt(getattr(user, 'blocked_at', None)),
+                blocked_reason=getattr(user, 'blocked_reason', None),
+                bot_blocked=bool(getattr(user, 'bot_blocked', False)),
+                bot_blocked_at=format_dt(getattr(user, 'bot_blocked_at', None)),
+                bot_blocked_reason=getattr(user, 'bot_blocked_reason', None),
+                trial_issued_at=format_dt(getattr(user, 'trial_issued_at', None)),
+                first_paid_at=format_dt(getattr(user, 'first_paid_at', None)),
             ),
             'subscriptions': subscriptions,
             'invoices': invoices,
@@ -2616,6 +2628,254 @@ async def admin_user_detail(request: Request, user_id: int):
             'error_message': request.query_params.get('error'),
         },
     )
+
+
+@router.post('/admin/users/{user_id}/notes', dependencies=[Depends(require_support)])
+async def admin_user_update_notes(
+    request: Request,
+    user_id: int,
+    admin_notes: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/users/{user_id}'
+    async with sessionmaker.begin() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_id_for_update(user_id)
+        if user is None:
+            return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+        before_len = len(user.admin_notes or '')
+        await repo.set_admin_notes(user, admin_notes)
+        after_len = len(user.admin_notes or '')
+        await AuditLogRepository(session).create(
+            action=AuditAction.user_notes_updated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='user',
+            entity_id=str(user_id),
+            details={'before_len': before_len, 'after_len': after_len},
+        )
+    return _redirect_with_message(redirect, success='Заметки обновлены')
+
+
+@router.post('/admin/users/{user_id}/tags/add', dependencies=[Depends(require_support)])
+async def admin_user_add_tag(
+    request: Request,
+    user_id: int,
+    tag: str = Form(...),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/users/{user_id}'
+    async with sessionmaker.begin() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_id_for_update(user_id)
+        if user is None:
+            return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+        try:
+            added = await repo.add_tag(user, tag)
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        if not added:
+            return _redirect_with_message(redirect, error=f'Тег «{tag.strip().lower()}» уже есть')
+        await AuditLogRepository(session).create(
+            action=AuditAction.user_tag_added,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='user',
+            entity_id=str(user_id),
+            details={'tag': tag.strip().lower(), 'tags_after': list(user.tags or [])},
+        )
+    return _redirect_with_message(redirect, success=f'Тег «{tag.strip().lower()}» добавлен')
+
+
+@router.post('/admin/users/{user_id}/tags/remove', dependencies=[Depends(require_support)])
+async def admin_user_remove_tag(
+    request: Request,
+    user_id: int,
+    tag: str = Form(...),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/users/{user_id}'
+    async with sessionmaker.begin() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_id_for_update(user_id)
+        if user is None:
+            return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+        removed = await repo.remove_tag(user, tag)
+        if not removed:
+            return _redirect_with_message(redirect, error=f'Тег «{tag}» не найден')
+        await AuditLogRepository(session).create(
+            action=AuditAction.user_tag_removed,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='user',
+            entity_id=str(user_id),
+            details={'tag': tag.strip().lower(), 'tags_after': list(user.tags or [])},
+        )
+    return _redirect_with_message(redirect, success=f'Тег «{tag.strip().lower()}» удалён')
+
+
+@router.post('/admin/users/{user_id}/block', dependencies=[Depends(require_support)])
+async def admin_user_block(
+    request: Request,
+    user_id: int,
+    reason: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/users/{user_id}'
+    normalized_reason = (reason or '').strip()[:255] or None
+    async with sessionmaker.begin() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_id_for_update(user_id)
+        if user is None:
+            return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+        if user.is_blocked:
+            return _redirect_with_message(redirect, error='Пользователь уже заблокирован')
+        await repo.set_blocked(user, True, normalized_reason)
+        await AuditLogRepository(session).create(
+            action=AuditAction.user_blocked,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='user',
+            entity_id=str(user_id),
+            details={'reason': normalized_reason},
+        )
+    return _redirect_with_message(redirect, success='Пользователь заблокирован')
+
+
+@router.post('/admin/users/{user_id}/unblock', dependencies=[Depends(require_support)])
+async def admin_user_unblock(
+    request: Request,
+    user_id: int,
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/users/{user_id}'
+    async with sessionmaker.begin() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_id_for_update(user_id)
+        if user is None:
+            return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+        if not user.is_blocked:
+            return _redirect_with_message(redirect, error='Пользователь не заблокирован')
+        previous_reason = user.blocked_reason
+        await repo.set_blocked(user, False, None)
+        await AuditLogRepository(session).create(
+            action=AuditAction.user_unblocked,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='user',
+            entity_id=str(user_id),
+            details={'previous_reason': previous_reason},
+        )
+    return _redirect_with_message(redirect, success='Пользователь разблокирован')
+
+
+@router.post('/admin/users/{user_id}/trial-reset', dependencies=[Depends(require_support)])
+async def admin_user_reset_trial(
+    request: Request,
+    user_id: int,
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/users/{user_id}'
+    async with sessionmaker.begin() as session:
+        repo = UserRepository(session)
+        user = await repo.get_by_id_for_update(user_id)
+        if user is None:
+            return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+        previous_at = user.trial_issued_at
+        reset_done = await repo.reset_trial(user)
+        if not reset_done:
+            return _redirect_with_message(redirect, error='У пользователя ещё не было выдан trial — сбрасывать нечего')
+        await AuditLogRepository(session).create(
+            action=AuditAction.user_trial_reset,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='user',
+            entity_id=str(user_id),
+            details={'previous_trial_issued_at': previous_at.isoformat() if previous_at else None},
+        )
+    return _redirect_with_message(redirect, success='Trial сброшен — пользователь сможет получить новый')
+
+
+@router.post(
+    '/admin/users/{user_id}/subscriptions/{subscription_id}/force-disable',
+    dependencies=[Depends(require_support)],
+)
+async def admin_user_force_disable_subscription(
+    request: Request,
+    user_id: int,
+    subscription_id: int,
+    reason: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    """Force-cancel подписки: `is_active=False` локально + статус
+    `disabled` в Marzban. Marzban-вызов идёт через circuit breaker
+    клиента; при OPEN-circuit или сетевой ошибке локальный флаг
+    остаётся True и UI получает понятную ошибку (НЕ полу-применяем).
+    """
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+    redirect = f'/admin/users/{user_id}'
+    normalized_reason = (reason or '').strip()[:255] or 'force_disabled_by_admin'
+
+    async with sessionmaker() as session:
+        sub = await SubscriptionRepository(session).get_by_id(subscription_id)
+        if sub is None or sub.user_id != user_id:
+            return _redirect_with_message(redirect, error='Подписка не найдена для этого пользователя')
+        if not sub.is_active:
+            return _redirect_with_message(redirect, error='Подписка уже неактивна')
+        marzban_username = sub.marzban_username
+
+    # Marzban-вызов вне транзакции — не держим row-lock, пока ходим в внешний API.
+    if settings.marzban_enabled and marzban_username:
+        marzban = MarzbanClient(settings)
+        try:
+            await marzban.safe_modify_user(marzban_username, status='disabled')
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Force-disable Marzban failed user_id=%s sub_id=%s', user_id, subscription_id)
+            with suppress(Exception):
+                await marzban.close()
+            return _redirect_with_message(
+                redirect,
+                error=f'Marzban-вызов не удался: {exc}. Локальный статус не изменён.',
+            )
+        with suppress(Exception):
+            await marzban.close()
+
+    async with sessionmaker.begin() as session:
+        sub_repo = SubscriptionRepository(session)
+        sub = await sub_repo.get_by_id_for_update(subscription_id)
+        if sub is None or sub.user_id != user_id:
+            return _redirect_with_message(redirect, error='Подписка не найдена')
+        sub.is_active = False
+        await session.flush()
+        await AuditLogRepository(session).create(
+            action=AuditAction.user_force_subscription_disabled,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='subscription',
+            entity_id=str(subscription_id),
+            details={
+                'user_id': user_id,
+                'service_id': sub.service_id,
+                'marzban_username': marzban_username,
+                'reason': normalized_reason,
+                'marzban_called': bool(settings.marzban_enabled and marzban_username),
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Подписка {sub.service_id} отключена')
 
 
 @router.post('/admin/users/{user_id}/balance', dependencies=[Depends(require_finance)])

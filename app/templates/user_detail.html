@@ -39,6 +39,29 @@
   </div>
   {% endif %}
 
+  {# FEA-ADMIN-USER-CRM: статусные плашки блокировки/trial над основной сводкой #}
+  <div class="flex flex-wrap items-center gap-2">
+    {% if user.is_blocked %}
+      <span class="inline-flex items-center gap-1 rounded-full border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200">
+        🚫 Заблокирован{% if user.blocked_at %} · {{ user.blocked_at }}{% endif %}{% if user.blocked_reason %} · {{ user.blocked_reason }}{% endif %}
+      </span>
+    {% endif %}
+    {% if user.bot_blocked %}
+      <span class="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200">
+        🤖 Бот заблокирован пользователем{% if user.bot_blocked_at %} · {{ user.bot_blocked_at }}{% endif %}
+      </span>
+    {% endif %}
+    {% for t in user.tags %}
+      <form method="post" action="/admin/users/{{ user.id }}/tags/remove" class="inline">
+        {{ csrf_input(request)|safe }}
+        <input type="hidden" name="tag" value="{{ t }}">
+        <button type="submit" class="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200 hover:border-rose-500 hover:text-rose-300" title="Удалить тег «{{ t }}»">
+          {{ t }}<span class="text-rose-400">✕</span>
+        </button>
+      </form>
+    {% endfor %}
+  </div>
+
   <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
     <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
       <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500">
@@ -207,6 +230,77 @@
     </div>
   </div>
 
+  {# FEA-ADMIN-USER-CRM: блок CRM-действий — заметки/теги/блокировка/trial #}
+  <div class="grid gap-6 xl:grid-cols-2">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">Заметки админа</h2>
+      <p class="mt-1 text-xs text-slate-500">Видны только в web-admin. Сохраняются как Text без ограничения длины. Каждое сохранение пишется в audit (без содержимого — только размер до/после).</p>
+      <form method="post" action="/admin/users/{{ user.id }}/notes" class="mt-4 space-y-3">
+        {{ csrf_input(request)|safe }}
+        <textarea name="admin_notes" rows="6" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" placeholder="Например: VIP-клиент, дать +1 неделю при следующем продлении">{{ user.admin_notes }}</textarea>
+        <button type="submit" class="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Сохранить заметки</button>
+      </form>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">Теги</h2>
+      <p class="mt-1 text-xs text-slate-500">Lowercase, ≤32 символа. Удалить — кликом по чипу в шапке. Добавить — формой ниже.</p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        {% for t in user.tags %}
+        <span class="inline-flex items-center rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200">{{ t }}</span>
+        {% else %}
+        <span class="text-xs text-slate-500">Тегов пока нет.</span>
+        {% endfor %}
+      </div>
+      <form method="post" action="/admin/users/{{ user.id }}/tags/add" class="mt-4 grid gap-3 sm:grid-cols-3">
+        {{ csrf_input(request)|safe }}
+        <input name="tag" placeholder="напр. vip" maxlength="32" required class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white sm:col-span-2">
+        <button type="submit" class="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Добавить тег</button>
+      </form>
+    </div>
+
+    <div class="rounded-3xl border {% if user.is_blocked %}border-rose-500/40 bg-rose-500/5{% else %}border-slate-800 bg-slate-900/70{% endif %} p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">Блокировка</h2>
+      {% if user.is_blocked %}
+      <p class="mt-2 text-sm text-rose-200">
+        Заблокирован {{ user.blocked_at or 'давно' }}{% if user.blocked_reason %} · «{{ user.blocked_reason }}»{% endif %}.
+        Пользователь не может оплачивать и пользоваться ботом.
+      </p>
+      <form method="post" action="/admin/users/{{ user.id }}/unblock" class="mt-4" data-confirm="Разблокировать пользователя {{ user.tg_id }}?">
+        {{ csrf_input(request)|safe }}
+        <button type="submit" class="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400">✓ Разблокировать</button>
+      </form>
+      {% else %}
+      <p class="mt-2 text-sm text-slate-400">Пользователь активен. Блокировка отменяет дальнейшие операции в боте; уже выданные подписки нужно деактивировать отдельно (force-disable в таблице ниже).</p>
+      <form method="post" action="/admin/users/{{ user.id }}/block" class="mt-4 space-y-3" data-confirm="Заблокировать пользователя {{ user.tg_id }}?">
+        {{ csrf_input(request)|safe }}
+        <input name="reason" maxlength="255" placeholder="Причина (для аудита)" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+        <button type="submit" class="rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-400">🚫 Заблокировать</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">Trial</h2>
+      <p class="mt-2 text-sm text-slate-400">
+        {% if user.trial_issued_at %}
+        Trial был выдан: <span class="text-slate-200">{{ user.trial_issued_at }}</span>.
+        {% else %}
+        Trial ещё не выдавался.
+        {% endif %}
+        {% if user.first_paid_at %}<br><span class="text-xs text-slate-500">Первая оплата: {{ user.first_paid_at }}</span>{% endif %}
+      </p>
+      {% if user.trial_issued_at %}
+      <form method="post" action="/admin/users/{{ user.id }}/trial-reset" class="mt-4" data-confirm="Сбросить trial-флаг? Пользователь сможет запросить новый trial.">
+        {{ csrf_input(request)|safe }}
+        <button type="submit" class="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-200">↻ Сбросить trial</button>
+      </form>
+      {% else %}
+      <p class="mt-3 text-xs text-slate-500">Кнопка появится после первой выдачи trial.</p>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
     <div class="border-b border-slate-800 px-6 py-5">
       <div class="flex flex-wrap items-center gap-3">
@@ -228,6 +322,7 @@
             <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
             <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Трафик</th>
             <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Дата окончания</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Действия</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-800">
@@ -244,10 +339,21 @@
             <td class="px-6 py-4 text-sm {{ 'text-emerald-400' if sub.is_active else 'text-rose-400' }}">{{ sub.status_label }}</td>
             <td class="px-6 py-4 text-sm text-slate-300">{{ sub.traffic_label }}</td>
             <td class="px-6 py-4 text-sm text-slate-300">{{ sub.expire_label }}</td>
+            <td class="px-6 py-4">
+              {% if sub.is_active and sub.id %}
+              <form method="post" action="/admin/users/{{ user.id }}/subscriptions/{{ sub.id }}/force-disable" class="flex items-center gap-2" data-confirm="Принудительно отключить подписку {{ sub.service_id }} (Marzban + локальный флаг)?">
+                {{ csrf_input(request)|safe }}
+                <input name="reason" maxlength="255" placeholder="Причина" class="rounded-xl border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white">
+                <button type="submit" class="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200">⛔ Force-disable</button>
+              </form>
+              {% else %}
+              <span class="text-xs text-slate-500">—</span>
+              {% endif %}
+            </td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="5" class="px-6 py-8 text-center text-sm text-slate-400">У пользователя пока нет услуг.</td>
+            <td colspan="6" class="px-6 py-8 text-center text-sm text-slate-400">У пользователя пока нет услуг.</td>
           </tr>
           {% endfor %}
         </tbody>
