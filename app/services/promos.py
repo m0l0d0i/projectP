@@ -231,8 +231,31 @@ class PromoService:
                 'max_uses': promo.max_uses,
             },
         )
+
+        # FEA-ADMIN-TARIFF-PLUS: если промокод привязан к тарифу
+        # (`unlocks_tariff_id`) — добавляем тариф в `unlocked_tariff_ids`
+        # пользователя, чтобы visibility-резолвер пускал к code_only/private.
+        unlock_message = ''
+        unlocks_tariff_id = getattr(promo, 'unlocks_tariff_id', None)
+        if unlocks_tariff_id is not None:
+            added = await self.users.add_unlocked_tariff(user, int(unlocks_tariff_id))
+            if added:
+                await self.audit.create(
+                    action=AuditAction.tariff_unlock_granted,
+                    actor_type=AuditActorType.user,
+                    actor_tg_id=tg_user_id,
+                    entity_type='tariff_plan',
+                    entity_id=str(unlocks_tariff_id),
+                    details={
+                        'source': 'promo_code',
+                        'promo_code': promo.code,
+                        'user_id': user.id,
+                    },
+                )
+                unlock_message = ' Также разблокирован специальный тариф.'
+
         await self.session.flush()
-        return True, '✅ Промокод применён. Баланс пополнен.'
+        return True, f'✅ Промокод применён. Баланс пополнен.{unlock_message}'
 
     async def create_promo(
         self,

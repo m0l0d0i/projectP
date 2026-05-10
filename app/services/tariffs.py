@@ -458,6 +458,45 @@ class PricingService:
         return result
 
     @classmethod
+    async def list_plans_for_user(
+        cls,
+        session: AsyncSession | None,
+        user: 'User | None',
+    ) -> list[TariffOption]:
+        """FEA-ADMIN-TARIFF-PLUS: list_plans + visibility-фильтр для
+        конкретного пользователя.
+
+        Применяет `filter_visible_tariffs` к sql-rows ДО конверсии в
+        `TariffOption`, чтобы скрытые тарифы не попадали в результат
+        даже как DTO. При отсутствии session — fallback на legacy-каталог
+        (visibility не применима).
+        """
+        from app.db.models import User  # noqa: F401  (для строкового аннотата)
+        from app.services.tariff_visibility import filter_visible_tariffs
+
+        if session is None:
+            return cls._fallback_legacy_catalog()
+
+        repo = TariffRepository(session)
+        list_public_active = getattr(repo, 'list_public_active', None)
+        if callable(list_public_active):
+            rows = await list_public_active()
+        else:
+            rows = await repo.list_active()
+
+        if not rows:
+            return cls._fallback_legacy_catalog()
+
+        visible_rows = await filter_visible_tariffs(session, user, rows)
+        if not visible_rows:
+            return cls._fallback_legacy_catalog()
+
+        rules = await cls.get_rules(session)
+        result = [await cls._option_from_row(session, repo, row, rules) for row in visible_rows]
+        result.sort(key=lambda item: (item.sort_order, item.tariff_id or 0, item.code))
+        return result
+
+    @classmethod
     async def list_archived_plans(cls, session: AsyncSession | None) -> list[TariffOption]:
         if session is None:
             return []

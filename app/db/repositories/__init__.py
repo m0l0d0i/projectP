@@ -369,6 +369,21 @@ class UserRepository:
         await self.session.flush()
         return True
 
+    async def add_unlocked_tariff(self, user: User, tariff_id: int) -> bool:
+        """FEA-ADMIN-TARIFF-PLUS: добавить тариф в `user.unlocked_tariff_ids`.
+
+        Возвращает True если был добавлен, False если уже был. Реассайн
+        list — обязателен для SQLAlchemy JSON-dirty (как и `add_tag`).
+        """
+        normalized = int(tariff_id)
+        current = list(int(x) for x in (user.unlocked_tariff_ids or []))
+        if normalized in current:
+            return False
+        current.append(normalized)
+        user.unlocked_tariff_ids = current
+        await self.session.flush()
+        return True
+
     async def reset_trial(self, user: User) -> bool:
         """Обнулить `trial_issued_at` (для повторной выдачи trial-подписки).
 
@@ -872,6 +887,20 @@ class TariffRepository:
     async def get_by_id_for_update(self, tariff_id: int) -> TariffPlan | None:
         res = await self.session.execute(
             select(TariffPlan).options(selectinload(TariffPlan.period_options)).where(TariffPlan.id == tariff_id).with_for_update()
+        )
+        return res.scalar_one_or_none()
+
+    async def get_by_private_token(self, token: str) -> TariffPlan | None:
+        """FEA-ADMIN-TARIFF-PLUS: резолв тарифа по private_token (deep-link).
+
+        Token уникален (см. unique constraint), пустые/whitespace
+        отсекаем заранее, чтобы не матчить случайные NULL.
+        """
+        normalized = (token or '').strip()
+        if not normalized:
+            return None
+        res = await self.session.execute(
+            select(TariffPlan).where(TariffPlan.private_token == normalized)
         )
         return res.scalar_one_or_none()
 
