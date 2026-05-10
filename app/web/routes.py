@@ -88,10 +88,11 @@ from app.services.support_ai import (
     build_provider,
     decrypt_api_key,
     encrypt_api_key,
+    generate_support_draft,
     mask_api_key_preview,
 )
 from app.services.tariffs import PricingService
-from app.observability.metrics import notification_counters_snapshot
+from app.observability.metrics import SUPPORT_AI_CALLS, notification_counters_snapshot
 from app.utils.formatters import DISPLAY_TIMEZONE, bytes_to_gb, format_dt
 from app.utils.runtime_settings import (
     effective_bool_from_row,
@@ -4533,9 +4534,13 @@ async def admin_tickets(
     )
 
 
-@router.get('/admin/tickets/{ticket_id}', response_class=HTMLResponse, dependencies=[Depends(require_any)])
-async def admin_ticket_detail(request: Request, ticket_id: int):
-    templates = request.app.state.templates
+async def _load_ticket_detail_context(request: Request, ticket_id: int) -> dict[str, Any]:
+    """Загрузить контекст для шаблона `admin_ticket_detail.html`.
+
+    Используется и обычным GET, и POST'ом генерации AI-черновика —
+    второй после генерации рендерит ту же страницу с дополнительными
+    `ai_draft`/`ai_used_canned_codes`/`ai_meta`/`ai_error` в context.
+    """
     sessionmaker = request.app.state.sessionmaker
 
     async with sessionmaker() as session:
@@ -4544,6 +4549,7 @@ async def admin_ticket_detail(request: Request, ticket_id: int):
         user_repo = UserRepository(session)
         admin_repo = WebAdminUserRepository(session)
         canned_repo = CannedResponseRepository(session)
+        llm_repo = LLMConfigRepository(session)
 
         ticket = await ticket_repo.get_by_id(ticket_id)
         if ticket is None:
@@ -4555,39 +4561,48 @@ async def admin_ticket_detail(request: Request, ticket_id: int):
         has_admin_reply = await ticket_repo.has_admin_reply(ticket_id)
         admins_list = await admin_repo.list_all()
         canned_responses = await canned_repo.list_active()
+        active_llm_config = await llm_repo.get_active()
         assignee = None
         if ticket.assignee_admin_id is not None:
             assignee = await admin_repo.get_by_id(ticket.assignee_admin_id)
 
-    return templates.TemplateResponse(
-        request,
-        'admin_ticket_detail.html',
-        {
-            'current_page': 'tickets',
-            'ticket': ticket,
-            'ticket_user': user,
-            'messages': messages,
-            'last_message_at': last_message_at,
-            'has_admin_reply': has_admin_reply,
-            'ticket_status_label': _support_status_label(ticket.status),
-            'ticket_status_tone': _support_status_badge_tone(ticket.status),
-            'ticket_last_actor_label': _support_actor_label(
-                getattr(ticket, 'last_actor_type', None),
-                getattr(ticket, 'last_actor_tg_id', None),
-            ),
-            'ticket_closed_by_label': _support_actor_label(
-                'admin' if getattr(ticket, 'closed_by_admin_tg_id', None) is not None else None,
-                getattr(ticket, 'closed_by_admin_tg_id', None),
-            ),
-            'ticket_close_reason': _normalized_optional_form_text(getattr(ticket, 'close_reason', None)),
-            'admins_list': admins_list,
-            'canned_responses': canned_responses,
-            'ticket_assignee': assignee,
-            'ticket_tags': list(ticket.tags or []),
-            'success_message': request.query_params.get('success'),
-            'error_message': request.query_params.get('error'),
-        },
-    )
+    return {
+        'current_page': 'tickets',
+        'ticket': ticket,
+        'ticket_user': user,
+        'messages': messages,
+        'last_message_at': last_message_at,
+        'has_admin_reply': has_admin_reply,
+        'ticket_status_label': _support_status_label(ticket.status),
+        'ticket_status_tone': _support_status_badge_tone(ticket.status),
+        'ticket_last_actor_label': _support_actor_label(
+            getattr(ticket, 'last_actor_type', None),
+            getattr(ticket, 'last_actor_tg_id', None),
+        ),
+        'ticket_closed_by_label': _support_actor_label(
+            'admin' if getattr(ticket, 'closed_by_admin_tg_id', None) is not None else None,
+            getattr(ticket, 'closed_by_admin_tg_id', None),
+        ),
+        'ticket_close_reason': _normalized_optional_form_text(getattr(ticket, 'close_reason', None)),
+        'admins_list': admins_list,
+        'canned_responses': canned_responses,
+        'ticket_assignee': assignee,
+        'ticket_tags': list(ticket.tags or []),
+        'active_llm_config': active_llm_config,
+        'ai_draft': None,
+        'ai_used_canned_codes': [],
+        'ai_meta': None,
+        'ai_error': None,
+        'success_message': request.query_params.get('success'),
+        'error_message': request.query_params.get('error'),
+    }
+
+
+@router.get('/admin/tickets/{ticket_id}', response_class=HTMLResponse, dependencies=[Depends(require_any)])
+async def admin_ticket_detail(request: Request, ticket_id: int):
+    templates = request.app.state.templates
+    context = await _load_ticket_detail_context(request, ticket_id)
+    return templates.TemplateResponse(request, 'admin_ticket_detail.html', context)
 
 
 @router.post('/admin/tickets/{ticket_id}/assignee', dependencies=[Depends(require_support)])
@@ -4764,6 +4779,176 @@ async def admin_ticket_close(
             await _notify_ticket_closed_from_web_admin(request, ticket_id=ticket_id, user_id=closed_user_id)
 
     return _redirect_with_message(f'/admin/tickets/{ticket_id}', success='Тикет закрыт')
+
+
+@router.post('/admin/tickets/{ticket_id}/ai-generate', response_class=HTMLResponse, dependencies=[Depends(require_support)])
+async def admin_ticket_ai_generate(
+    request: Request,
+    ticket_id: int,
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    """Сгенерировать черновик ответа на тикет через активный LLMConfig.
+
+    Возвращает ту же страницу `admin_ticket_detail.html`, но с
+    `ai_draft` (текст) и `ai_meta` (provider/model/tokens/latency) в
+    контексте — саппорт правит черновик в textarea и копирует в
+    Telegram. Сетевые/HTTP-ошибки попадают в `ai_error` без падения
+    страницы.
+
+    Метрика: `vpn_bot_support_ai_calls_total{provider, status}` —
+    incrementится в любом из исходов (ok/error/no_active_config).
+    Audit: `support_ai_generated` (status=ok|error, used_canned_codes,
+    tokens, latency, error message при failure).
+    """
+    sessionmaker = request.app.state.sessionmaker
+    templates = request.app.state.templates
+    context = await _load_ticket_detail_context(request, ticket_id)
+
+    active_config: 'LLMConfig | None' = context.get('active_llm_config')
+    if active_config is None:
+        SUPPORT_AI_CALLS.labels(provider='none', status='no_active_config').inc()
+        context['ai_error'] = (
+            'Нет активного LLM-конфига. Откройте /admin/support-ai/ и '
+            'создайте/активируйте конфиг.'
+        )
+        return templates.TemplateResponse(request, 'admin_ticket_detail.html', context)
+
+    provider_value = active_config.provider.value
+    config_id = active_config.id
+    ticket = context['ticket']
+    messages = context['messages']
+    canned_responses = context['canned_responses']
+
+    try:
+        result = await generate_support_draft(
+            active_config,
+            ticket,
+            messages,
+            canned_responses,
+            timeout_seconds=30.0,
+        )
+    except LLMSecretsKeyError as exc:
+        SUPPORT_AI_CALLS.labels(provider=provider_value, status='secrets_error').inc()
+        await _audit_support_ai(
+            sessionmaker,
+            principal=principal,
+            config_id=config_id,
+            ticket_id=ticket_id,
+            status='error',
+            details={'error_kind': 'secrets', 'error': str(exc)[:500]},
+        )
+        context['ai_error'] = f'Не удалось расшифровать api_key: {exc}'
+        return templates.TemplateResponse(request, 'admin_ticket_detail.html', context)
+    except LLMProviderError as exc:
+        SUPPORT_AI_CALLS.labels(provider=provider_value, status='provider_error').inc()
+        message = exc.provider_message or str(exc)
+        if exc.status_code:
+            message = f'HTTP {exc.status_code}: {message}'
+        await _audit_support_ai(
+            sessionmaker,
+            principal=principal,
+            config_id=config_id,
+            ticket_id=ticket_id,
+            status='error',
+            details={
+                'error_kind': 'provider',
+                'status_code': exc.status_code,
+                'error': message[:500],
+            },
+        )
+        context['ai_error'] = f'Ошибка провайдера: {message[:300]}'
+        return templates.TemplateResponse(request, 'admin_ticket_detail.html', context)
+    except Exception as exc:  # noqa: BLE001
+        SUPPORT_AI_CALLS.labels(provider=provider_value, status='unexpected_error').inc()
+        logger.exception('Support-AI generate failed for ticket=%s config=%s', ticket_id, config_id)
+        await _audit_support_ai(
+            sessionmaker,
+            principal=principal,
+            config_id=config_id,
+            ticket_id=ticket_id,
+            status='error',
+            details={'error_kind': 'unexpected', 'error': repr(exc)[:500]},
+        )
+        context['ai_error'] = f'Непредвиденная ошибка: {exc}'
+        return templates.TemplateResponse(request, 'admin_ticket_detail.html', context)
+
+    SUPPORT_AI_CALLS.labels(provider=provider_value, status='ok').inc()
+
+    # Запись usage + few-shot usage_count + audit — в одной транзакции,
+    # чтобы при ошибке audit'а не остался "висячий" usage.
+    async with sessionmaker.begin() as session:
+        llm_repo = LLMConfigRepository(session)
+        canned_repo = CannedResponseRepository(session)
+        config_row = await llm_repo.get_by_id(config_id)
+        if config_row is not None:
+            await llm_repo.record_usage(
+                config_row,
+                tokens_in=result.response.tokens_in,
+                tokens_out=result.response.tokens_out,
+            )
+        for code in result.used_canned_codes:
+            cr = await canned_repo.get_by_code(code)
+            if cr is not None:
+                await canned_repo.increment_usage(cr)
+        await AuditLogRepository(session).create(
+            action=AuditAction.support_ai_generated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='support_ticket',
+            entity_id=str(ticket_id),
+            details={
+                'status': 'ok',
+                'config_id': config_id,
+                'provider': provider_value,
+                'model': result.response.model,
+                'tokens_in': result.response.tokens_in,
+                'tokens_out': result.response.tokens_out,
+                'latency_ms': result.response.latency_ms,
+                'used_canned_codes': result.used_canned_codes,
+            },
+        )
+
+    context['ai_draft'] = result.draft
+    context['ai_used_canned_codes'] = result.used_canned_codes
+    context['ai_meta'] = {
+        'provider_label': _LLM_PROVIDER_LABELS.get(provider_value, provider_value),
+        'model': result.response.model,
+        'tokens_in': result.response.tokens_in,
+        'tokens_out': result.response.tokens_out,
+        'latency_ms': result.response.latency_ms,
+    }
+    return templates.TemplateResponse(request, 'admin_ticket_detail.html', context)
+
+
+async def _audit_support_ai(
+    sessionmaker,
+    *,
+    principal: WebAdminPrincipal,
+    config_id: int,
+    ticket_id: int,
+    status: str,
+    details: dict[str, Any],
+) -> None:
+    """Записать audit `support_ai_generated` со status=error в отдельной
+    транзакции. Используется failure-веткой генерации (там основной
+    sessionmaker.begin() блок ещё не открывался)."""
+    payload = dict(details)
+    payload['status'] = status
+    payload['config_id'] = config_id
+    try:
+        async with sessionmaker.begin() as session:
+            await AuditLogRepository(session).create(
+                action=AuditAction.support_ai_generated,
+                actor_type=AuditActorType.admin,
+                actor_tg_id=None,
+                actor_username=principal.username,
+                entity_type='support_ticket',
+                entity_id=str(ticket_id),
+                details=payload,
+            )
+    except Exception:
+        logger.exception('Failed to audit support_ai_generated for ticket=%s', ticket_id)
 
 
 def _parse_canned_tags(raw: str | None) -> list[str]:

@@ -28,6 +28,11 @@ from app.services.support_ai.crypto import (
 )
 from app.services.support_ai.deepseek import DEEPSEEK_DEFAULT_API_BASE_URL
 from app.services.support_ai.factory import build_provider
+from app.services.support_ai.generate import (
+    SupportDraftResult,
+    build_messages,
+    generate_support_draft,
+)
 from app.services.support_ai.openai_compat import OpenAICompatProvider
 from app.services.support_ai.pii import mask_pii
 
@@ -38,9 +43,12 @@ __all__ = (
     'LLMResponse',
     'LLMSecretsKeyError',
     'OpenAICompatProvider',
+    'SupportDraftResult',
+    'build_messages',
     'build_provider',
     'decrypt_api_key',
     'encrypt_api_key',
+    'generate_support_draft',
     'mask_api_key_preview',
     'mask_pii',
 )

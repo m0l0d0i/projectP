@@ -391,6 +391,48 @@
         </form>
       </div>
 
+      {# FEA-C32: AI-генерация черновика ответа на тикет #}
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="text-xl font-semibold text-white">🤖 AI-черновик</h2>
+          <a href="/admin/support-ai/" class="text-xs text-cyan-300 hover:text-cyan-200">конфиг →</a>
+        </div>
+        {% if active_llm_config %}
+          <p class="mt-1 text-xs text-slate-500">
+            Активный LLM: <code class="text-slate-200">{{ active_llm_config.title }}</code>
+            ({{ active_llm_config.model_name }}). PII-данные пользователя
+            маскируются перед отправкой; в few-shot подкладываются шаблоны
+            ответов по тегам тикета.
+          </p>
+        {% else %}
+          <p class="mt-1 text-xs text-rose-300">Нет активного LLM-конфига. Создайте/активируйте на /admin/support-ai/.</p>
+        {% endif %}
+        {% if ai_error %}
+        <div class="mt-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">❌ {{ ai_error }}</div>
+        {% endif %}
+        <form method="post" action="/admin/tickets/{{ ticket.id }}/ai-generate" class="mt-4">
+          {{ csrf_input(request)|safe }}
+          <button type="submit" class="w-full rounded-2xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-400" {% if not active_llm_config %}disabled{% endif %}>
+            🤖 Сгенерировать черновик
+          </button>
+        </form>
+        {% if ai_draft %}
+        <div class="mt-4 space-y-3">
+          {% if ai_meta %}
+          <div class="text-xs text-slate-500">
+            {{ ai_meta.provider_label }} · {{ ai_meta.model }} · tokens {{ ai_meta.tokens_in }}+{{ ai_meta.tokens_out }} · {{ ai_meta.latency_ms }} мс
+            {% if ai_used_canned_codes %} · few-shot: {{ ai_used_canned_codes|join(', ') }}{% endif %}
+          </div>
+          {% endif %}
+          <textarea rows="10" readonly class="w-full whitespace-pre-wrap rounded-2xl border border-violet-500/30 bg-slate-950 px-3 py-2 text-sm text-slate-100">{{ ai_draft }}</textarea>
+          <p class="text-xs text-slate-500">
+            Скопируйте, отредактируйте и отправьте через Telegram-бота. Текст сейчас не сохраняется в БД —
+            если страница перезагружена, черновик пропадёт. При желании сохраните как новый шаблон в /admin/canned-responses/.
+          </p>
+        </div>
+        {% endif %}
+      </div>
+
       <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
         <div class="flex items-center justify-between gap-2">
           <h2 class="text-xl font-semibold text-white">Шаблоны ответов</h2>

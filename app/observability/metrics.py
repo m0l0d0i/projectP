@@ -33,6 +33,12 @@ NOTIFICATIONS_BLOCKED = Counter(
     ['code', 'reason'],
 )
 
+SUPPORT_AI_CALLS = Counter(
+    'vpn_bot_support_ai_calls_total',
+    'FEA-C32: вызовы LLM для генерации черновика ответа саппорта',
+    ['provider', 'status'],
+)
+
 
 def notification_counters_snapshot() -> dict[str, dict[str, float]]:
     """Снимок in-process Prometheus-counter'ов NotificationDispatcher.
