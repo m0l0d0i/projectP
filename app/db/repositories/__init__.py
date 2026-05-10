@@ -1415,6 +1415,156 @@ class SubscriptionRepository:
         )
         return list(res.all())
 
+    # ---- FEA-ADMIN-SUB-CRM: admin search + filters ----
+
+    STATUS_ALL = 'all'
+    STATUS_ACTIVE = 'active'
+    STATUS_EXPIRED = 'expired'
+    STATUS_EXHAUSTED = 'exhausted'
+    STATUS_DISABLED = 'disabled'
+    STATUS_TRIAL = 'trial'
+
+    _ALLOWED_STATUS_FILTERS: tuple[str, ...] = (
+        STATUS_ALL,
+        STATUS_ACTIVE,
+        STATUS_EXPIRED,
+        STATUS_EXHAUSTED,
+        STATUS_DISABLED,
+        STATUS_TRIAL,
+    )
+
+    @classmethod
+    def normalize_admin_status_filter(cls, value: str | None) -> str:
+        normalized = (value or cls.STATUS_ALL).strip().lower()
+        return normalized if normalized in cls._ALLOWED_STATUS_FILTERS else cls.STATUS_ALL
+
+    def _build_admin_search_stmt(
+        self,
+        *,
+        query: str | None,
+        status_filter: str,
+        tariff_code: str | None,
+        with_user: bool,
+        for_count: bool = False,
+    ):
+        """Собирает SELECT для admin-страницы /admin/subscriptions/.
+
+        Не выставляет limit/offset/order_by — это делает вызывающий.
+        with_user=True добавляет JOIN на users и возвращает обе сущности
+        (для отображения username/tg_id в строках); for_count=True
+        возвращает только COUNT(distinct subscription.id).
+        """
+        now = datetime.now(timezone.utc)
+
+        if for_count:
+            stmt = select(func.count(func.distinct(Subscription.id))).select_from(Subscription)
+        else:
+            if with_user:
+                stmt = select(Subscription, User)
+            else:
+                stmt = select(Subscription)
+
+        # JOIN users всегда — фильтрация по tg_id/username использует таблицу.
+        stmt = stmt.join(User, User.id == Subscription.user_id)
+
+        normalized_query = (query or '').strip().lstrip('@')
+        if normalized_query:
+            if normalized_query.isdigit():
+                numeric = int(normalized_query)
+                stmt = stmt.where(
+                    or_(
+                        User.id == numeric,
+                        User.tg_id == numeric,
+                        Subscription.id == numeric,
+                    )
+                )
+            else:
+                pattern = f'%{normalized_query.lower()}%'
+                stmt = stmt.where(
+                    or_(
+                        func.lower(Subscription.service_id).like(pattern),
+                        func.lower(Subscription.marzban_username).like(pattern),
+                        func.lower(func.coalesce(User.username, '')).like(pattern),
+                        func.lower(func.coalesce(Subscription.current_tariff_code, '')).like(pattern),
+                    )
+                )
+
+        if status_filter == self.STATUS_ACTIVE:
+            stmt = stmt.where(
+                Subscription.is_active.is_(True),
+                or_(Subscription.expire_date.is_(None), Subscription.expire_date > now),
+                or_(
+                    Subscription.data_limit_bytes.is_(None),
+                    Subscription.data_limit_bytes == 0,
+                    Subscription.used_traffic_bytes < Subscription.data_limit_bytes,
+                ),
+            )
+        elif status_filter == self.STATUS_EXPIRED:
+            stmt = stmt.where(
+                Subscription.expire_date.is_not(None),
+                Subscription.expire_date <= now,
+            )
+        elif status_filter == self.STATUS_EXHAUSTED:
+            stmt = stmt.where(
+                Subscription.data_limit_bytes.is_not(None),
+                Subscription.data_limit_bytes > 0,
+                Subscription.used_traffic_bytes >= Subscription.data_limit_bytes,
+            )
+        elif status_filter == self.STATUS_DISABLED:
+            stmt = stmt.where(Subscription.is_active.is_(False))
+        elif status_filter == self.STATUS_TRIAL:
+            stmt = stmt.where(Subscription.is_trial.is_(True))
+
+        if tariff_code:
+            stmt = stmt.where(Subscription.current_tariff_code == tariff_code)
+
+        return stmt
+
+    async def admin_search(
+        self,
+        *,
+        query: str | None = None,
+        status_filter: str | None = None,
+        tariff_code: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[tuple[Subscription, User]]:
+        """Поиск подписок для /admin/subscriptions/. Возвращает список
+        (subscription, user) для отображения в таблице. Сортировка —
+        новые сверху."""
+        normalized_status = self.normalize_admin_status_filter(status_filter)
+        stmt = self._build_admin_search_stmt(
+            query=query,
+            status_filter=normalized_status,
+            tariff_code=tariff_code,
+            with_user=True,
+        )
+        stmt = (
+            stmt.order_by(Subscription.created_at.desc(), Subscription.id.desc())
+            .offset(int(offset))
+            .limit(int(limit))
+        )
+        res = await self.session.execute(stmt)
+        return [(sub, usr) for sub, usr in res.all()]
+
+    async def admin_search_count(
+        self,
+        *,
+        query: str | None = None,
+        status_filter: str | None = None,
+        tariff_code: str | None = None,
+    ) -> int:
+        normalized_status = self.normalize_admin_status_filter(status_filter)
+        stmt = self._build_admin_search_stmt(
+            query=query,
+            status_filter=normalized_status,
+            tariff_code=tariff_code,
+            with_user=False,
+            for_count=True,
+        )
+        res = await self.session.execute(stmt)
+        return int(res.scalar_one() or 0)
+
     async def trial_pending_milestones(
         self, *, expire_after: datetime
     ) -> list[tuple[Subscription, User]]:

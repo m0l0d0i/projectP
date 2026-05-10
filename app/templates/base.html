@@ -17,6 +17,7 @@
     'pricing': 'Тарифы и цены',
     'trial': 'Тестовая подписка',
     'tickets': 'Тикеты поддержки',
+    'subscriptions': 'Подписки',
     'antispam': 'Антиспам',
     'rules': 'Правила и документы',
     'notifications': 'Push-уведомления',
@@ -45,6 +46,7 @@
     'pricing': 'DB-driven тарифы, правила ценообразования, архив и настройки конструктора.',
     'trial': 'Настройки выдачи тестовой подписки и связанного поведения в боте.',
     'tickets': 'Поддержка, статусы диалогов, история переписки и служебные действия.',
+    'subscriptions': 'Список подписок с поиском и фильтрами (FEA-ADMIN-SUB-CRM): продление, сброс трафика, force-disable, смена тарифа.',
     'antispam': 'Пороговые значения и защитные настройки против спама и флуда.',
     'rules': 'Публичные правила, документы и ссылки, которые видит пользователь.',
     'notifications': 'Сценарии smart push-уведомлений (FEA-NOTIF): шаблоны, cooldown, метрики.',
@@ -89,6 +91,10 @@
 
           <a href="/admin/users/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'users' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
             Пользователи
+          </a>
+
+          <a href="/admin/subscriptions/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'subscriptions' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
+            Подписки
           </a>
 
           <a href="/admin/tickets/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'tickets' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">

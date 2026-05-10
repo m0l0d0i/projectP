@@ -6059,6 +6059,128 @@ async def admin_support_ai_delete(
     return _redirect_with_message(redirect, success=f'LLM-конфиг «{title}» удалён')
 
 
+# --- Subscriptions admin (FEA-ADMIN-SUB-CRM) -------------------------------
+
+_SUBSCRIPTIONS_PAGE_SIZE = ADMIN_PAGE_SIZE
+_SUBSCRIPTION_STATUS_LABELS: dict[str, str] = {
+    SubscriptionRepository.STATUS_ALL: 'Все',
+    SubscriptionRepository.STATUS_ACTIVE: 'Активные',
+    SubscriptionRepository.STATUS_EXPIRED: 'Истёкшие',
+    SubscriptionRepository.STATUS_EXHAUSTED: 'Трафик исчерпан',
+    SubscriptionRepository.STATUS_DISABLED: 'Отключены',
+    SubscriptionRepository.STATUS_TRIAL: 'Trial',
+}
+
+
+def _subscription_row_view(sub, user) -> dict[str, Any]:
+    monthly = getattr(sub, 'monthly_traffic_bytes', None)
+    if monthly is None or monthly == 0:
+        traffic_label = '♾️ Безлимит'
+    else:
+        traffic_label = f'{bytes_to_gb(monthly)} ГБ / мес.'
+    used = int(getattr(sub, 'used_traffic_bytes', 0) or 0)
+    limit = getattr(sub, 'data_limit_bytes', None)
+    if limit and limit > 0:
+        used_label = f'{bytes_to_gb(used)} / {bytes_to_gb(limit)} ГБ'
+    else:
+        used_label = f'{bytes_to_gb(used)} ГБ' if used else '—'
+    is_active = bool(getattr(sub, 'is_active', False))
+    expire_at = getattr(sub, 'expire_date', None)
+    now = datetime.now(timezone.utc)
+    if not is_active:
+        status_label, status_tone = 'Отключена', 'rose'
+    elif expire_at and expire_at <= now:
+        status_label, status_tone = 'Истекла', 'amber'
+    elif limit and limit > 0 and used >= limit:
+        status_label, status_tone = 'Трафик исчерпан', 'amber'
+    else:
+        status_label, status_tone = 'Активна', 'emerald'
+    return {
+        'id': getattr(sub, 'id', None),
+        'service_id': getattr(sub, 'service_id', '—'),
+        'marzban_username': getattr(sub, 'marzban_username', '—'),
+        'is_trial': bool(getattr(sub, 'is_trial', False)),
+        'is_active': is_active,
+        'status_label': status_label,
+        'status_tone': status_tone,
+        'traffic_label': traffic_label,
+        'used_label': used_label,
+        'expire_label': format_dt(expire_at) or '—',
+        'tariff_code': getattr(sub, 'current_tariff_code', None) or '—',
+        'created_at': format_dt(getattr(sub, 'created_at', None)),
+        'user_id': getattr(user, 'id', None),
+        'user_tg_id': getattr(user, 'tg_id', None),
+        'user_username': getattr(user, 'username', None),
+    }
+
+
+@router.get('/admin/subscriptions/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
+async def admin_subscriptions(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    status: str = Query(default='all'),
+    q: str | None = Query(default=None),
+    tariff: str | None = Query(default=None),
+):
+    """Список подписок с поиском и фильтрами (FEA-ADMIN-SUB-CRM #1).
+
+    Поиск: по `service_id`, `marzban_username`, `users.username`,
+    `current_tariff_code`, или числовому `id` подписки/`user.id`/`user.tg_id`.
+    Фильтры: статус (all/active/expired/exhausted/disabled/trial),
+    конкретный tariff_code.
+    """
+    sessionmaker = request.app.state.sessionmaker
+    templates = request.app.state.templates
+
+    status_filter = SubscriptionRepository.normalize_admin_status_filter(status)
+    query = (q or '').strip() or None
+    tariff_code = (tariff or '').strip() or None
+    offset = (page - 1) * _SUBSCRIPTIONS_PAGE_SIZE
+
+    async with sessionmaker() as session:
+        sub_repo = SubscriptionRepository(session)
+        rows_raw = await sub_repo.admin_search(
+            query=query,
+            status_filter=status_filter,
+            tariff_code=tariff_code,
+            limit=_SUBSCRIPTIONS_PAGE_SIZE,
+            offset=offset,
+        )
+        total = await sub_repo.admin_search_count(
+            query=query,
+            status_filter=status_filter,
+            tariff_code=tariff_code,
+        )
+        tariffs = await TariffRepository(session).list_active()
+
+    rows = [_subscription_row_view(sub, usr) for sub, usr in rows_raw]
+    has_next_page = (page * _SUBSCRIPTIONS_PAGE_SIZE) < total
+
+    return templates.TemplateResponse(
+        request,
+        'admin_subscriptions.html',
+        {
+            'current_page': 'subscriptions',
+            'rows': rows,
+            'total': total,
+            'page': page,
+            'has_prev': page > 1,
+            'has_next_page': has_next_page,
+            'status_filter': status_filter,
+            'status_filters': [
+                (value, label) for value, label in _SUBSCRIPTION_STATUS_LABELS.items()
+            ],
+            'query': query or '',
+            'tariff_filter': tariff_code or '',
+            'tariff_options': [
+                {'code': t.code, 'title': t.title} for t in tariffs if getattr(t, 'code', None)
+            ],
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
 @router.get('/admin/promocodes/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_promocodes(
     request: Request,
