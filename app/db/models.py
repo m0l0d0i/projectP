@@ -160,6 +160,11 @@ class AuditAction(str, enum.Enum):
     traffic_topup_option_toggled = 'traffic_topup_option_toggled'
     mid_cycle_device_settings_updated = 'mid_cycle_device_settings_updated'
     web_admin_action = 'web_admin_action'
+    ticket_assigned = 'ticket_assigned'
+    ticket_tagged = 'ticket_tagged'
+    canned_response_created = 'canned_response_created'
+    canned_response_updated = 'canned_response_updated'
+    canned_response_deleted = 'canned_response_deleted'
 
 
 class AuditActorType(str, enum.Enum):
@@ -1156,8 +1161,17 @@ class SupportTicket(TimestampMixin, Base):
         nullable=True,
     )
     last_actor_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    assignee_admin_id: Mapped[int | None] = mapped_column(
+        ForeignKey('web_admin_users.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    tags: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=sa_text("'[]'::json")
+    )
 
     user: Mapped['User'] = relationship(back_populates='support_tickets')
+    assignee: Mapped['WebAdminUser | None'] = relationship(foreign_keys=[assignee_admin_id])
     messages: Mapped[list['SupportMessage']] = relationship(
         back_populates='ticket',
         cascade='all, delete-orphan',
@@ -1498,3 +1512,57 @@ class WebAdminUser(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CannedResponse(TimestampMixin, Base):
+    """Шаблоны быстрых ответов саппорта (FEA-C31).
+
+    Доступны в `/admin/tickets/{id}` через выпадающий список «Вставить
+    шаблон»; справочник управляется через `/admin/canned-responses/`.
+    `usage_count` инкрементируется при вставке в тикет — для аналитики
+    самых ходовых шаблонов. `tags` JSONB используется для группировки
+    в выпадающем списке (onboarding/billing/troubleshooting/closing).
+    """
+
+    __tablename__ = 'canned_responses'
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(trim(code)) > 0",
+            name='ck_canned_responses_code_not_blank',
+        ),
+        CheckConstraint(
+            "char_length(trim(title)) > 0",
+            name='ck_canned_responses_title_not_blank',
+        ),
+        CheckConstraint(
+            "char_length(content) > 0",
+            name='ck_canned_responses_content_not_blank',
+        ),
+        CheckConstraint(
+            'usage_count >= 0',
+            name='ck_canned_responses_usage_count_non_negative',
+        ),
+        UniqueConstraint('code', name='uq_canned_responses_code'),
+        Index('ix_canned_responses_active_sort', 'is_active', 'sort_order'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tags: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=sa_text("'[]'::json")
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa_text('true')
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, server_default=sa_text('100')
+    )
+    usage_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=sa_text('0')
+    )
+    created_by_admin_id: Mapped[int | None] = mapped_column(
+        ForeignKey('web_admin_users.id', ondelete='SET NULL'),
+        nullable=True,
+    )

@@ -22,6 +22,7 @@ from app.db.models import (
     BroadcastJob,
     BroadcastJobDelivery,
     BroadcastJobStatus,
+    CannedResponse,
     Invoice,
     InvoicePurpose,
     InvoiceStatus,
@@ -2294,6 +2295,176 @@ class SupportTicketRepository:
             ticket.last_actor_tg_id = normalized_actor_tg_id
         await self.session.flush()
         return True
+
+    async def set_assignee(
+        self,
+        ticket: SupportTicket,
+        admin_id: int | None,
+    ) -> SupportTicket:
+        ticket.assignee_admin_id = int(admin_id) if admin_id is not None else None
+        await self.session.flush()
+        return ticket
+
+    @staticmethod
+    def _normalize_tag(value: str) -> str:
+        return (value or '').strip().lower()
+
+    async def add_tag(self, ticket: SupportTicket, tag: str) -> SupportTicket:
+        normalized = self._normalize_tag(tag)
+        if not normalized:
+            raise ValueError('Тег не может быть пустым')
+        if len(normalized) > 32:
+            raise ValueError('Тег не длиннее 32 символов')
+        # SQLAlchemy на JSON-mutate без реассайна не определяет dirty.
+        current = list(ticket.tags or [])
+        if normalized in current:
+            return ticket
+        current.append(normalized)
+        ticket.tags = current
+        await self.session.flush()
+        return ticket
+
+    async def remove_tag(self, ticket: SupportTicket, tag: str) -> SupportTicket:
+        normalized = self._normalize_tag(tag)
+        if not normalized:
+            return ticket
+        current = [t for t in (ticket.tags or []) if t != normalized]
+        ticket.tags = current
+        await self.session.flush()
+        return ticket
+
+
+class CannedResponseRepository:
+    """CRUD по таблице canned_responses (FEA-C31)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    @staticmethod
+    def _normalize_code(value: str) -> str:
+        normalized = (value or '').strip()
+        if not normalized:
+            raise ValueError('code не может быть пустым')
+        if len(normalized) > 64:
+            raise ValueError('code не длиннее 64 символов')
+        return normalized
+
+    @staticmethod
+    def _normalize_tags(value: list[str] | tuple[str, ...] | None) -> list[str]:
+        if not value:
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            normalized = (raw or '').strip().lower()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
+        return result
+
+    async def get_by_id(self, response_id: int) -> CannedResponse | None:
+        res = await self.session.execute(
+            select(CannedResponse).where(CannedResponse.id == response_id)
+        )
+        return res.scalar_one_or_none()
+
+    async def get_by_code(self, code: str) -> CannedResponse | None:
+        normalized = (code or '').strip()
+        if not normalized:
+            return None
+        res = await self.session.execute(
+            select(CannedResponse).where(CannedResponse.code == normalized)
+        )
+        return res.scalar_one_or_none()
+
+    async def list_all(self) -> list[CannedResponse]:
+        res = await self.session.execute(
+            select(CannedResponse).order_by(
+                CannedResponse.is_active.desc(),
+                CannedResponse.sort_order.asc(),
+                CannedResponse.title.asc(),
+            )
+        )
+        return list(res.scalars().all())
+
+    async def list_active(self) -> list[CannedResponse]:
+        res = await self.session.execute(
+            select(CannedResponse)
+            .where(CannedResponse.is_active.is_(True))
+            .order_by(CannedResponse.sort_order.asc(), CannedResponse.title.asc())
+        )
+        return list(res.scalars().all())
+
+    async def create(
+        self,
+        *,
+        code: str,
+        title: str,
+        content: str,
+        tags: list[str] | None = None,
+        is_active: bool = True,
+        sort_order: int = 100,
+        created_by_admin_id: int | None = None,
+    ) -> CannedResponse:
+        normalized_code = self._normalize_code(code)
+        normalized_title = (title or '').strip()
+        normalized_content = (content or '').strip()
+        if not normalized_title or len(normalized_title) > 128:
+            raise ValueError('Title обязателен и не длиннее 128 символов')
+        if not normalized_content:
+            raise ValueError('Content не может быть пустым')
+        row = CannedResponse(
+            code=normalized_code,
+            title=normalized_title,
+            content=normalized_content,
+            tags=self._normalize_tags(tags),
+            is_active=bool(is_active),
+            sort_order=max(0, int(sort_order)),
+            usage_count=0,
+            created_by_admin_id=int(created_by_admin_id) if created_by_admin_id is not None else None,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def update(
+        self,
+        row: CannedResponse,
+        *,
+        title: str | None = None,
+        content: str | None = None,
+        tags: list[str] | None = None,
+        is_active: bool | None = None,
+        sort_order: int | None = None,
+    ) -> CannedResponse:
+        if title is not None:
+            normalized_title = title.strip()
+            if not normalized_title or len(normalized_title) > 128:
+                raise ValueError('Title обязателен и не длиннее 128 символов')
+            row.title = normalized_title
+        if content is not None:
+            normalized_content = content.strip()
+            if not normalized_content:
+                raise ValueError('Content не может быть пустым')
+            row.content = normalized_content
+        if tags is not None:
+            row.tags = self._normalize_tags(tags)
+        if is_active is not None:
+            row.is_active = bool(is_active)
+        if sort_order is not None:
+            row.sort_order = max(0, int(sort_order))
+        await self.session.flush()
+        return row
+
+    async def increment_usage(self, row: CannedResponse) -> CannedResponse:
+        row.usage_count = int(row.usage_count or 0) + 1
+        await self.session.flush()
+        return row
+
+    async def delete(self, row: CannedResponse) -> None:
+        await self.session.delete(row)
+        await self.session.flush()
 
 
 class BroadcastJobRepository:
