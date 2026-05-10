@@ -1732,6 +1732,30 @@ class ReferralRepository:
         res = await self.session.execute(select(func.count(Referral.id)).where(Referral.inviter_id == inviter_id))
         return int(res.scalar_one())
 
+    async def list_invited_with_user(
+        self,
+        inviter_id: int,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[tuple[Referral, User]]:
+        """Список рефералов с подгруженным User (для экрана «Мои рефералы»).
+
+        Сортировка: новые сверху (по created_at desc, id desc — стабильно
+        при коллизиях времени). limit/offset для пагинации; UI пока
+        показывает только первую страницу.
+        """
+        stmt = (
+            select(Referral, User)
+            .join(User, User.id == Referral.invited_id)
+            .where(Referral.inviter_id == inviter_id)
+            .order_by(Referral.created_at.desc(), Referral.id.desc())
+            .limit(int(limit))
+            .offset(int(offset))
+        )
+        res = await self.session.execute(stmt)
+        return [(referral, user) for referral, user in res.all()]
+
     async def exists_for_invited(self, invited_id: int) -> bool:
         res = await self.session.execute(select(func.count(Referral.id)).where(Referral.invited_id == invited_id))
         return int(res.scalar_one()) > 0

@@ -151,3 +151,31 @@ class ReferralService:
         inviter_bonus, _ = await self._load_bonuses()
         referral_balance = (inviter_bonus * activated_count).quantize(Decimal('0.01'))
         return invited_count, referral_balance
+
+    async def list_referrals_for_inviter(
+        self,
+        inviter_user_id: int,
+        *,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Список приглашённых для экрана «Мои рефералы» (FEA-A6).
+
+        Возвращает уже сериализованные dict'ы (а не ORM-объекты) — handler
+        работает после `await session.commit()`/закрытия и не должен
+        дёргать ORM-аттрибуты с lazy-loading.
+        """
+        rows = await self.referrals.list_invited_with_user(inviter_user_id, limit=limit)
+        return [
+            {
+                'id': referral.id,
+                'invited_user_id': invited.id,
+                'invited_tg_id': invited.tg_id,
+                'invited_username': invited.username,
+                'invited_first_name': invited.first_name,
+                'source': referral.source.value,
+                'is_activated': referral.is_activated,
+                'activated_at': referral.activated_at,
+                'created_at': referral.created_at,
+            }
+            for referral, invited in rows
+        ]

@@ -10,10 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories import SubscriptionRepository
 from app.handlers.common import get_or_create_user
-from app.keyboards.inline import ProfileCallback, profile_back_keyboard, profile_keyboard
+from app.keyboards.inline import (
+    ProfileCallback,
+    profile_keyboard,
+    referral_list_back_keyboard,
+    referral_program_keyboard,
+)
 from app.services.promos import PromoService
 from app.services.referrals import ReferralService
 from app.states.profile import ProfileState
+from app.utils.formatters import format_dt
 from app.utils.telegram import safe_edit_message_text, safe_edit_reply_markup
 
 router = Router(name='profile')
@@ -120,12 +126,67 @@ async def profile_ref_program(callback: CallbackQuery, session: AsyncSession) ->
         '📊 <b>Статистика:</b>\n'
         f'👥 Приглашённые: <b>{invited_count}</b>\n'
         f'💸 Реферальный баланс: <b>{_format_balance(ref_balance)} ₽</b>\n\n'
-        'Ссылку и код удобно копировать прямо из блока выше.'
+        'Ссылку и код удобно копировать прямо из блока выше.\n'
+        'Нажмите «Мои рефералы», чтобы посмотреть список приглашённых и статус активации.'
     )
     await safe_edit_message_text(
         callback.message,
         text,
-        reply_markup=profile_back_keyboard(),
+        reply_markup=referral_program_keyboard(),
+        disable_web_page_preview=True,
+    )
+    await callback.answer()
+
+
+_MY_REFERRALS_LIMIT = 15
+
+
+def _format_referral_row(idx: int, item: dict) -> str:
+    """Одна строка экрана «Мои рефералы»."""
+    if item['invited_username']:
+        who = f'@{fmt.quote(item["invited_username"])}'
+    elif item['invited_first_name']:
+        who = f'{fmt.quote(item["invited_first_name"])} (tg <code>{item["invited_tg_id"]}</code>)'
+    else:
+        who = f'tg <code>{item["invited_tg_id"]}</code>'
+
+    if item['is_activated']:
+        when = format_dt(item['activated_at']) if item['activated_at'] else format_dt(item['created_at'])
+        status = f'✅ активирован · {when}'
+    else:
+        status = '⏳ ждёт первой оплаты'
+
+    source_label = 'по ссылке' if item['source'] == 'link' else 'промокод'
+    return f'{idx}. {who} — {status} · {source_label}'
+
+
+@router.callback_query(ProfileCallback.filter(F.action == 'my_referrals'))
+async def profile_my_referrals(callback: CallbackQuery, session: AsyncSession) -> None:
+    user = await get_or_create_user(callback, session)
+    service = ReferralService(session)
+    invited_count, ref_balance = await service.stats_for_inviter(user.id)
+    items = await service.list_referrals_for_inviter(user.id, limit=_MY_REFERRALS_LIMIT)
+    activated_count = sum(1 for it in items if it['is_activated'])
+
+    if not items:
+        body = 'У вас пока нет приглашённых. Поделитесь ссылкой или кодом из экрана реферальной программы.'
+    else:
+        rows = [_format_referral_row(idx, item) for idx, item in enumerate(items, 1)]
+        body = '\n'.join(rows)
+        if invited_count > len(items):
+            body += f'\n\n<i>Показаны последние {len(items)} из {invited_count}. Старые приглашения скрыты.</i>'
+
+    text = (
+        '👥 <b>Мои рефералы</b>\n\n'
+        f'📊 Всего приглашено: <b>{invited_count}</b>\n'
+        f'✅ Активировано: <b>{activated_count}</b>\n'
+        f'💸 Реферальный баланс: <b>{_format_balance(ref_balance)} ₽</b>\n\n'
+        f'{body}'
+    )
+    await safe_edit_message_text(
+        callback.message,
+        text,
+        reply_markup=referral_list_back_keyboard(),
         disable_web_page_preview=True,
     )
     await callback.answer()

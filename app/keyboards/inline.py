@@ -586,6 +586,28 @@ def profile_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='⬅️ Назад', callback_data=ProfileCallback(action='back').pack())]])
 
 
+def referral_program_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура экрана «Реферальная программа» (FEA-A6 хвост).
+
+    Добавляет «👥 Мои рефералы» рядом с возвратом в профиль.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text='👥 Мои рефералы', callback_data=ProfileCallback(action='my_referrals').pack())],
+            [InlineKeyboardButton(text='⬅️ Назад', callback_data=ProfileCallback(action='back').pack())],
+        ]
+    )
+
+
+def referral_list_back_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка возврата на экран «Реферальная программа»."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text='⬅️ К реферальной программе', callback_data=ProfileCallback(action='ref_program').pack())],
+        ]
+    )
+
+
 def support_ticket_keyboard(ticket_id: int, *, is_open: bool) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if is_open:
