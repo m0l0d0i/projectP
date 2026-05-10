@@ -124,6 +124,28 @@ class TopUpBasket:
 
 
 @dataclass(frozen=True, slots=True)
+class DeviceTopupQuote:
+    """Снимок цены и режима mid-cycle апсейла устройства (FEA-A9).
+
+    `monthly_extra_device_price` — стоимость одного дополнительного
+    устройства в месяц по правилам/тарифу (без proration); `price` —
+    итоговая сумма к оплате с учётом выбранного режима.
+    """
+
+    price: Decimal
+    mode: str
+    days_left: int
+    days_in_cycle: int
+    monthly_extra_device_price: Decimal
+    fixed_price: Decimal
+    current_device_mode: str
+    current_device_count: int
+    new_device_mode: str
+    new_device_count: int
+    online_limit: int
+
+
+@dataclass(frozen=True, slots=True)
 class PricingRuleSnapshot:
     base_price: Decimal = Decimal('100.00')
     base_traffic_gb: int = 250
@@ -806,3 +828,70 @@ class PricingService:
         ratio = Decimal(safe_days_left) / Decimal(days_in_month)
         raw = Decimal(monthly_price) * ratio
         return money(raw.quantize(Decimal('1'), rounding=ROUND_CEILING))
+
+    @classmethod
+    async def quote_device_topup(
+        cls,
+        *,
+        session: 'AsyncSession',
+        current_device_mode: str,
+        current_device_count: int | None,
+        days_left: int,
+        days_in_cycle: int,
+        price_mode: str,
+        fixed_price: Decimal,
+        plan: TariffOption | None = None,
+    ) -> DeviceTopupQuote:
+        """Расчёт цены добавления одного устройства до конца цикла (FEA-A9).
+
+        `prorated`: monthly_extra_device_price * days_left / days_in_cycle,
+        с округлением вверх до рубля (как `calculate_reset_price`).
+        `fixed`: fixed_price as is.
+        Источник `monthly_extra_device_price` — `plan.device_step_price`,
+        если задан, иначе `rules.device_step_price`.
+        """
+        normalized_mode = (current_device_mode or '').strip().lower()
+        if normalized_mode not in {'single', 'custom'}:
+            raise ValueError(
+                'Добавление устройства недоступно для безлимитного режима устройств.'
+            )
+
+        existing_count = 1 if normalized_mode == 'single' else max(2, int(current_device_count or 0))
+        new_device_count = existing_count + 1
+        if new_device_count > cls.MAX_CUSTOM_DEVICES:
+            raise ValueError(
+                f'Достигнут максимум устройств ({cls.MAX_CUSTOM_DEVICES}).'
+            )
+
+        rules = await cls.get_rules(session)
+        plan_step_price = getattr(plan, 'device_step_price', None) if plan is not None else None
+        monthly_extra_device_price = money(plan_step_price or rules.device_step_price)
+
+        normalized_price_mode = (price_mode or 'prorated').strip().lower()
+        if normalized_price_mode not in {'prorated', 'fixed'}:
+            normalized_price_mode = 'prorated'
+
+        normalized_fixed_price = money(fixed_price or Decimal('0.00'))
+
+        if normalized_price_mode == 'fixed':
+            price = normalized_fixed_price
+        else:
+            price = cls.calculate_reset_price(
+                monthly_extra_device_price,
+                days_left_in_month=days_left,
+                days_in_month=days_in_cycle,
+            )
+
+        return DeviceTopupQuote(
+            price=price,
+            mode=normalized_price_mode,
+            days_left=int(days_left),
+            days_in_cycle=int(days_in_cycle),
+            monthly_extra_device_price=monthly_extra_device_price,
+            fixed_price=normalized_fixed_price,
+            current_device_mode=normalized_mode,
+            current_device_count=existing_count,
+            new_device_mode='custom',
+            new_device_count=new_device_count,
+            online_limit=new_device_count,
+        )

@@ -281,6 +281,10 @@ class SubscriptionService:
             next_reset_at=None,
         )
 
+    def derive_cycle_bounds(self, subscription: Subscription, *, now: datetime) -> tuple[datetime, datetime]:
+        """Public-facing alias of `_derive_cycle_bounds` for use by other services (FEA-A9)."""
+        return self._derive_cycle_bounds(subscription, now=now)
+
     def _derive_cycle_bounds(self, subscription: Subscription, *, now: datetime) -> tuple[datetime, datetime]:
         cycle_start_at = self._normalize_utc(getattr(subscription, 'traffic_cycle_start_at', None))
         cycle_end_at = self._normalize_utc(getattr(subscription, 'traffic_cycle_end_at', None))
@@ -958,6 +962,11 @@ class SubscriptionService:
                     subscription = await self.subscriptions.get_by_id_for_update(latest_active.id)
             return await self._apply_topup_invoice(subscription, invoice)
 
+        if invoice.purpose == InvoicePurpose.device_topup:
+            if subscription is None:
+                raise ValueError('Не удалось определить подписку для апсейла устройства.')
+            return await self._apply_device_topup_invoice(subscription, invoice)
+
         raise ValueError(f'Unsupported invoice purpose: {invoice.purpose}')
 
     async def _apply_tariff_invoice(self, user: User, subscription: Subscription | None, invoice: Invoice) -> MarzbanUser:
@@ -1077,6 +1086,51 @@ class SubscriptionService:
                 )
 
         await self.subscriptions.reset_notification_flags(subscription)
+        return marzban_user
+
+    async def _apply_device_topup_invoice(self, subscription: Subscription, invoice: Invoice) -> MarzbanUser | None:
+        if getattr(subscription, 'is_trial', False):
+            raise ValueError('Для тестовой подписки апсейл устройства недоступен.')
+
+        current_mode = self._normalize_device_mode(getattr(subscription, 'used_device_mode', None))
+        if current_mode == 'unlimited':
+            raise ValueError('Для безлимитного режима устройств апсейл недоступен.')
+
+        existing_count = 1 if current_mode == 'single' else max(2, int(getattr(subscription, 'used_device_count', 0) or 0))
+        new_count = existing_count + 1
+        if new_count > PricingService.MAX_CUSTOM_DEVICES:
+            raise ValueError(
+                f'Достигнут максимум устройств ({PricingService.MAX_CUSTOM_DEVICES}).'
+            )
+
+        try:
+            marzban_user = await self.marzban.set_online_limit(subscription.marzban_username, new_count)
+        except MarzbanAPIError:
+            logger.exception(
+                'Failed to update Marzban online_limit on device topup: subscription_id=%s username=%s new_limit=%s',
+                getattr(subscription, 'id', None),
+                getattr(subscription, 'marzban_username', None),
+                new_count,
+            )
+            raise
+
+        # Локальное состояние апдейтим в любом случае: даже если Marzban
+        # online-limit field не сконфигурирован (set_online_limit вернул
+        # None), DB-счётчики и онбординг должны совпадать с задизайненным
+        # лимитом. Marzban узнает о новом лимите при ближайшем sync.
+        subscription.used_device_mode = 'custom'
+        subscription.used_device_count = new_count
+        subscription.online_limit = new_count
+
+        if marzban_user is not None:
+            self._sync_local_from_remote(subscription, marzban_user)
+            # `online_limit` после sync затирается значением из Marzban —
+            # перезаписываем тем, что только что выставили (Marzban мог
+            # вернуть устаревший снэпшот, если update прошёл асинхронно).
+            subscription.used_device_mode = 'custom'
+            subscription.used_device_count = new_count
+            subscription.online_limit = new_count
+
         return marzban_user
 
     async def _apply_topup_invoice(self, subscription: Subscription | None, invoice: Invoice) -> MarzbanUser:

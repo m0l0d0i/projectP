@@ -1181,6 +1181,22 @@ class MarzbanClient:
         new_limit = int(current_limit) + int(extra_gb) * (1024 ** 3)
         return await self.safe_modify_user(username, data_limit=new_limit, status='active', is_trial=False)
 
+    async def set_online_limit(self, username: str, online_limit: int | None) -> MarzbanUser | None:
+        """Update only the online-limit field (mid-cycle device topup, FEA-A9).
+
+        Returns None if the Marzban deployment doesn't expose an
+        online-limit field (`marzban_online_limit_field` пуст) — каллер
+        в этом случае ограничивается локальным апдейтом.
+        """
+        field = self.settings.marzban_online_limit_field
+        if not field:
+            return None
+        return await self.safe_modify_user(
+            username,
+            is_trial=False,
+            **{field: online_limit},
+        )
+
     def _default_create_payload(
         self,
         *,

@@ -20,6 +20,7 @@ from app.db.models import (
     User,
 )
 from app.db.repositories import (
+    AppSettingsRepository,
     AuditLogRepository,
     InvoiceRepository,
     OutboxRepository,
@@ -78,6 +79,7 @@ class PaymentService:
         self.transactions = TransactionRepository(session)
         self.referrals = ReferralService(session)
         self.audit = AuditLogRepository(session)
+        self.app_settings = AppSettingsRepository(session)
 
     @staticmethod
     def _money(value: Decimal | str | int | float) -> Decimal:
@@ -740,6 +742,133 @@ class PaymentService:
             amount=self._money(basket.total),
             balance_used=Decimal('0.00'),
             payable_amount=self._money(basket.payable),
+            provider=self.payments.provider_name,
+            payload_json=payload,
+            idempotency_key=idempotency_key,
+        )
+        self._normalize_invoice_amounts(invoice)
+        await self._refresh_provider_invoice(invoice)
+        PAYMENTS_CREATED.labels(purpose=invoice.purpose.value).inc()
+        return invoice
+
+    async def _validate_device_topup_target(self, *, user: User, subscription_id: int | None) -> Subscription:
+        subscription = await self._resolve_user_subscription(
+            user=user,
+            subscription_id=subscription_id,
+            require_active=True,
+        )
+        if subscription is None:
+            raise ValueError('Активная подписка не найдена')
+        if self._subscription_is_trial(subscription):
+            raise ValueError('Для тестовой подписки апсейл устройства недоступен.')
+
+        normalized_mode = (getattr(subscription, 'used_device_mode', None) or '').strip().lower()
+        if normalized_mode == 'unlimited':
+            raise ValueError('Для безлимитного режима устройств апсейл не требуется.')
+
+        existing_count = 1 if normalized_mode == 'single' else max(
+            2,
+            int(getattr(subscription, 'used_device_count', 0) or 0),
+        )
+        if existing_count + 1 > PricingService.MAX_CUSTOM_DEVICES:
+            raise ValueError(
+                f'Достигнут максимум устройств ({PricingService.MAX_CUSTOM_DEVICES}).'
+            )
+
+        return subscription
+
+    async def quote_device_topup(self, *, user: User, subscription_id: int | None):
+        """Cчитает стоимость mid-cycle апсейла устройства (FEA-A9).
+
+        Используется UX preview-экраном и admin-панелью; вынесено отдельно
+        от create_device_topup_invoice, чтобы не плодить «зависшие»
+        invoices при простой проверке цены.
+        """
+        subscription = await self._validate_device_topup_target(
+            user=user,
+            subscription_id=subscription_id,
+        )
+
+        app_settings = await self.app_settings.ensure()
+        if not getattr(app_settings, 'mid_cycle_device_topup_enabled', False):
+            raise ValueError('Апсейл устройства временно недоступен.')
+
+        now = datetime.now(timezone.utc)
+        cycle_start, cycle_end = self.subscription_service.derive_cycle_bounds(
+            subscription, now=now,
+        )
+        days_left, days_in_cycle = SubscriptionService._calculate_cycle_day_stats(
+            now=now,
+            cycle_start_at=cycle_start,
+            cycle_end_at=cycle_end,
+        )
+
+        plan = None
+        tariff_code = getattr(subscription, 'current_tariff_code', None)
+        if tariff_code:
+            try:
+                plan = await PricingService.get_plan(self.session, tariff_code)
+            except Exception:
+                plan = None
+
+        quote = await PricingService.quote_device_topup(
+            session=self.session,
+            current_device_mode=getattr(subscription, 'used_device_mode', None) or 'single',
+            current_device_count=getattr(subscription, 'used_device_count', None),
+            days_left=days_left,
+            days_in_cycle=days_in_cycle,
+            price_mode=getattr(app_settings, 'mid_cycle_device_price_mode', 'prorated'),
+            fixed_price=getattr(app_settings, 'mid_cycle_device_fixed_price', Decimal('0.00')) or Decimal('0.00'),
+            plan=plan,
+        )
+        return subscription, quote
+
+    async def create_device_topup_invoice(self, *, user: User, subscription_id: int | None = None) -> Invoice:
+        subscription, quote = await self.quote_device_topup(
+            user=user,
+            subscription_id=subscription_id,
+        )
+
+        amount = self._money(quote.price)
+        if amount <= 0:
+            # Защита от свободного апсейла: если конфиг даёт цену 0
+            # (fixed_price=0 или days_left=0 при prorated), не создаём
+            # бесплатный invoice — лучше сообщить пользователю осмысленно.
+            raise ValueError('Стоимость апсейла устройства не настроена. Обратитесь в поддержку.')
+
+        payload = {
+            'kind': 'device_topup',
+            'description': '+1 устройство до конца текущего периода',
+            'price_mode': quote.mode,
+            'days_left': quote.days_left,
+            'days_in_cycle': quote.days_in_cycle,
+            'monthly_extra_device_price': str(quote.monthly_extra_device_price),
+            'previous_device_mode': quote.current_device_mode,
+            'previous_device_count': quote.current_device_count,
+            'new_device_mode': quote.new_device_mode,
+            'new_device_count': quote.new_device_count,
+            'online_limit': quote.online_limit,
+            **self._build_subscription_snapshot_payload(subscription),
+        }
+        # Idempotency: ключ строится из subscription_id + текущего количества
+        # устройств; повторный клик в пределах окна 60 сек = тот же ключ =
+        # DuplicateInvoiceError. После успешной оплаты count изменится,
+        # следующий клик уже создаст новый invoice.
+        idempotency_key = build_invoice_idempotency_key(
+            tg_id=user.tg_id,
+            purpose=InvoicePurpose.device_topup.value,
+            code=str(subscription.id),
+            units=quote.new_device_count,
+            extras={
+                'price_mode': quote.mode,
+            },
+        )
+        invoice = await self._create_invoice(
+            user_id=user.id,
+            purpose=InvoicePurpose.device_topup,
+            amount=amount,
+            balance_used=Decimal('0.00'),
+            payable_amount=amount,
             provider=self.payments.provider_name,
             payload_json=payload,
             idempotency_key=idempotency_key,

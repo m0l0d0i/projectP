@@ -36,6 +36,7 @@ class InvoicePurpose(str, enum.Enum):
     tariff = 'tariff'
     topup = 'topup'
     balance_topup = 'balance_topup'
+    device_topup = 'device_topup'
 
 
 class InvoiceStatus(str, enum.Enum):
@@ -930,6 +931,14 @@ class AppSettings(TimestampMixin, Base):
             'anti_spam_min_interval_seconds >= 0',
             name='ck_app_settings_antispam_min_interval_non_negative',
         ),
+        CheckConstraint(
+            "mid_cycle_device_price_mode IN ('prorated', 'fixed')",
+            name='ck_app_settings_mid_cycle_device_price_mode',
+        ),
+        CheckConstraint(
+            'mid_cycle_device_fixed_price >= 0',
+            name='ck_app_settings_mid_cycle_device_fixed_price_non_negative',
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1, server_default=sa_text('1'))
@@ -983,6 +992,24 @@ class AppSettings(TimestampMixin, Base):
         nullable=False,
         default=True,
         server_default=sa_text('true'),
+    )
+    mid_cycle_device_topup_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=sa_text('true'),
+    )
+    mid_cycle_device_price_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default='prorated',
+        server_default=sa_text("'prorated'"),
+    )
+    mid_cycle_device_fixed_price: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal('99.00'),
+        server_default=sa_text('99.00'),
     )
 
 
