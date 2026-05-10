@@ -19,12 +19,11 @@
   - Авто-бейдж «⭐ Лучшая цена/ГБ» проставляется опции с минимальной ценой за ГБ среди включённых (если победитель один). Кастомный `badge_label` имеет приоритет.
   - Promo-код применим к topup invoice через существующий balance-flow: `redeem` пополняет `User.balance`, в topup-корзине добавлен hint «На балансе есть N ₽ — нажмите Использовать баланс» (`purchase.py:render_invoice_text`). Default flow без auto-apply сохранён.
   - Перепроектирование `PromoCode` на типы/скидки (kind=bonus|topup_discount|tariff_discount) вынесено в будущий sprint.
-- [ ] **FEA-A9 (M, P2, D5).** Mid-cycle апсейл устройств — сейчас не поддерживается. Устройства задаются только при покупке тарифа.
-  - Опция «Добавить устройство к текущей подписке» в `purchase.py` / `vpn.py` если `used_device_count < MAX_CUSTOM_DEVICES`.
-  - Цена пропорционально оставшимся дням (или фиксированная, конфиг в `AppSettings.mid_cycle_device_price_mode`).
-  - Новый `InvoicePurpose.device_topup` (миграция); после оплаты `_consume_paid_invoice` инкрементирует `used_device_count` и зовёт `MarzbanClient.update_user_online_limit`.
-  - `/admin/upsells/devices/` — настройка цены/лимита/on-off.
-  - Bonus: апгрейд single → unlimited mid-cycle (доплата = разница).
+- [x] **FEA-A9 (M, P2, D5).** Mid-cycle апсейл устройств — закрыто Sprint 2.
+  - Backend (миграция 28): новое значение enum `InvoicePurpose.device_topup` + 3 поля в `app_settings` (`mid_cycle_device_topup_enabled` / `_price_mode` prorated|fixed / `_fixed_price`). `PaymentService.create_device_topup_invoice(user, subscription_id)` — расчёт через `PricingService.quote_device_topup` (prorated = `device_step_price × days_left/days_in_cycle` с округлением вверх, fixed = `_fixed_price`). `SubscriptionService._apply_device_topup_invoice` — инкремент `used_device_count` + `MarzbanClient.set_online_limit` (no-op если поле не сконфигурировано — DB-состояние всё равно апдейтится).
+  - UX: кнопка «➕ Добавить устройство» в карточке подписки (`vpn_details_keyboard`); показывается только при активной подписке (не trial, не unlimited-traffic, expire_date в будущем) и `used_device_count + 1 ≤ MAX_CUSTOM_DEVICES`. Preview-экран с разбивкой стоимости/режима; invoice flow через существующий `render_invoice_text` (расширен веткой `device_topup`).
+  - Admin (миграция 29): `/admin/upsells/devices/` — on/off, режим расчёта (radio prorated|fixed), фикс-цена и live-таблица превью на 30/15/5/1 день. Аудит — `AuditAction.mid_cycle_device_settings_updated`.
+  - Bonus single → unlimited mid-cycle вынесен в Sprint 7 (см. ROADMAP backlog).
 - [ ] **FEA-A10 (M, P2).** Premium / dedicated-IP tier через `RoutingProfile.tier` + `node_policy.py`.
 - [ ] **FEA-A11 (M, P2).** Family / group plans — `Subscription.parent_subscription_id`, экран «manage members».
 - [ ] **FEA-A12 (L, P3).** Corporate plan — scoped `/biz/` admin для самообслуживания компании.

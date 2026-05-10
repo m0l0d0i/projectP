@@ -544,6 +544,30 @@ class AppSettingsRepository:
         await self.session.flush()
         return row
 
+    async def update_mid_cycle_device_settings(
+        self,
+        row: AppSettings,
+        *,
+        enabled: bool,
+        price_mode: str,
+        fixed_price: Decimal | int | float | str,
+    ) -> AppSettings:
+        normalized_mode = (price_mode or '').strip().lower()
+        if normalized_mode not in {'prorated', 'fixed'}:
+            raise ValueError("price_mode должен быть 'prorated' или 'fixed'")
+        try:
+            normalized_fixed = Decimal(str(fixed_price)).quantize(Decimal('0.01'))
+        except Exception as exc:
+            raise ValueError('Цена должна быть числом') from exc
+        if normalized_fixed < 0:
+            raise ValueError('Цена должна быть ≥ 0')
+
+        row.mid_cycle_device_topup_enabled = bool(enabled)
+        row.mid_cycle_device_price_mode = normalized_mode
+        row.mid_cycle_device_fixed_price = normalized_fixed
+        await self.session.flush()
+        return row
+
 
 class PricingRuleRepository:
     def __init__(self, session: AsyncSession) -> None:

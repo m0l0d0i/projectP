@@ -4034,6 +4034,105 @@ async def admin_upsells_traffic_delete(request: Request, option_id: int):
     return _redirect_with_message(redirect, success=f'Опция «{code}» удалена')
 
 
+def _device_topup_preview_examples(
+    *,
+    monthly_extra_device_price: Decimal,
+    fixed_price: Decimal,
+    sample_days: tuple[int, ...] = (30, 15, 5, 1),
+    days_in_cycle: int = 30,
+) -> list[dict[str, Any]]:
+    """Live-preview для admin: цена для нескольких days_left при текущей monthly-ставке.
+
+    Используем ту же формулу, что и `PricingService.calculate_reset_price`
+    (round CEILING до рубля), чтобы превью совпадало с реальной ценой
+    в боте.
+    """
+    examples: list[dict[str, Any]] = []
+    for days_left in sample_days:
+        prorated = PricingService.calculate_reset_price(
+            monthly_extra_device_price,
+            days_left_in_month=days_left,
+            days_in_month=days_in_cycle,
+        )
+        examples.append({
+            'days_left': days_left,
+            'days_in_cycle': days_in_cycle,
+            'prorated_price': prorated,
+            'fixed_price': fixed_price,
+        })
+    return examples
+
+
+@router.get('/admin/upsells/devices/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
+async def admin_upsells_devices(request: Request):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+    async with sessionmaker() as session:
+        app_settings = await AppSettingsRepository(session).ensure()
+        rules = await PricingService.get_rules(session)
+    monthly_price = Decimal(str(rules.device_step_price))
+    fixed_price = Decimal(str(app_settings.mid_cycle_device_fixed_price))
+    examples = _device_topup_preview_examples(
+        monthly_extra_device_price=monthly_price,
+        fixed_price=fixed_price,
+    )
+    return templates.TemplateResponse(
+        request,
+        'admin_upsells_devices.html',
+        {
+            'current_page': 'upsells_devices',
+            'enabled': app_settings.mid_cycle_device_topup_enabled,
+            'price_mode': app_settings.mid_cycle_device_price_mode,
+            'fixed_price': fixed_price,
+            'monthly_extra_device_price': monthly_price,
+            'max_custom_devices': PricingService.MAX_CUSTOM_DEVICES,
+            'preview_examples': examples,
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+@router.post('/admin/upsells/devices/', dependencies=[Depends(require_web_admin)])
+async def admin_upsells_devices_update(
+    request: Request,
+    price_mode: str = Form(...),
+    fixed_price: str = Form(...),
+    enabled: str = Form(default=''),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/upsells/devices/'
+    try:
+        normalized_fixed = Decimal((fixed_price or '').strip().replace(',', '.'))
+    except Exception:
+        return _redirect_with_message(redirect, error='Цена должна быть числом')
+    async with sessionmaker.begin() as session:
+        repo = AppSettingsRepository(session)
+        row = await repo.ensure()
+        try:
+            await repo.update_mid_cycle_device_settings(
+                row,
+                enabled=bool(enabled),
+                price_mode=price_mode,
+                fixed_price=normalized_fixed,
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.mid_cycle_device_settings_updated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            entity_type='app_settings',
+            entity_id='1',
+            details={
+                'enabled': row.mid_cycle_device_topup_enabled,
+                'price_mode': row.mid_cycle_device_price_mode,
+                'fixed_price': str(row.mid_cycle_device_fixed_price),
+            },
+        )
+    return _redirect_with_message(redirect, success='Настройки апсейла устройств сохранены')
+
+
 @router.get('/admin/tickets/', response_class=HTMLResponse, dependencies=[Depends(require_web_admin)])
 async def admin_tickets(
     request: Request,

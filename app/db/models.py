@@ -158,6 +158,7 @@ class AuditAction(str, enum.Enum):
     traffic_topup_option_updated = 'traffic_topup_option_updated'
     traffic_topup_option_deleted = 'traffic_topup_option_deleted'
     traffic_topup_option_toggled = 'traffic_topup_option_toggled'
+    mid_cycle_device_settings_updated = 'mid_cycle_device_settings_updated'
 
 
 class AuditActorType(str, enum.Enum):

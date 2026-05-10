@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Апсейлы устройств{% endblock %}
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Апсейлы / Устройства</div>
+      <h1 class="mt-4 text-3xl font-bold text-white">Mid-cycle апсейл устройств</h1>
+      <p class="mt-2 text-slate-400">
+        Кнопка «➕ Добавить устройство» в карточке подписки (FEA-A9). Доступна только если
+        подписка активна, не trial, не безлимит-traffic и текущий лимит устройств меньше
+        <span class="text-slate-200">{{ max_custom_devices }}</span>.
+      </p>
+    </div>
+    <a href="/admin/system/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">← На главную</a>
+  </div>
+
+  {% if success_message %}<div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">✅ {{ success_message }}</div>{% endif %}
+  {% if error_message %}<div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">❌ {{ error_message }}</div>{% endif %}
+
+  <div class="grid gap-4 sm:grid-cols-3">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Статус</div>
+      <div class="mt-2 text-3xl font-semibold {% if enabled %}text-emerald-300{% else %}text-rose-300{% endif %}">
+        {% if enabled %}включён{% else %}выключен{% endif %}
+      </div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Режим расчёта</div>
+      <div class="mt-2 text-2xl font-semibold text-white">
+        {% if price_mode == 'fixed' %}фиксированная{% else %}пропорционально{% endif %}
+      </div>
+      <div class="mt-1 text-xs text-slate-500">{{ price_mode }}</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Месячная цена 1 устройства</div>
+      <div class="mt-2 text-2xl font-semibold text-white">{{ monthly_extra_device_price }} ₽</div>
+      <div class="mt-1 text-xs text-slate-500">из правил/тарифа (device_step_price)</div>
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <h2 class="text-xl font-semibold text-white">Настройки</h2>
+    <p class="mt-2 text-sm text-slate-400">
+      <span class="text-slate-200">Пропорционально</span> — цена месячного шага умножается на оставшиеся дни цикла
+      и округляется вверх до рубля. <span class="text-slate-200">Фиксированная</span> — берётся значение поля ниже без proration.
+    </p>
+    <form method="post" action="/admin/upsells/devices/" class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <label class="flex items-center gap-2 text-sm text-slate-300 sm:col-span-2 xl:col-span-1">
+        <input type="checkbox" name="enabled" value="1" {% if enabled %}checked{% endif %}>
+        Фича включена
+      </label>
+
+      <div class="flex flex-col gap-2 sm:col-span-2 xl:col-span-2">
+        <span class="text-xs uppercase tracking-wider text-slate-500">Режим расчёта</span>
+        <div class="flex flex-wrap gap-3">
+          <label class="inline-flex items-center gap-2 text-sm text-slate-300">
+            <input type="radio" name="price_mode" value="prorated" {% if price_mode != 'fixed' %}checked{% endif %}> пропорционально
+          </label>
+          <label class="inline-flex items-center gap-2 text-sm text-slate-300">
+            <input type="radio" name="price_mode" value="fixed" {% if price_mode == 'fixed' %}checked{% endif %}> фиксированная
+          </label>
+        </div>
+      </div>
+
+      <label class="flex flex-col gap-1 text-sm text-slate-300 sm:col-span-2 xl:col-span-1">
+        <span class="text-xs uppercase tracking-wider text-slate-500">Фикс-цена, ₽</span>
+        <input name="fixed_price" value="{{ fixed_price }}" required class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+      </label>
+
+      <button type="submit" class="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 sm:col-span-2 xl:col-span-4">Сохранить</button>
+    </form>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <h2 class="text-xl font-semibold text-white">Превью цены</h2>
+    <p class="mt-2 text-sm text-slate-400">
+      Расчёт берёт <span class="text-slate-200">device_step_price = {{ monthly_extra_device_price }} ₽/мес</span>
+      из правил тарифа (PricingRule). Реальная цена в боте подтянет кастомное значение из подписанного
+      тарифа, если оно задано.
+    </p>
+    <div class="mt-4 overflow-x-auto">
+      <table class="w-full text-sm text-slate-200">
+        <thead class="text-xs uppercase tracking-wider text-slate-500">
+          <tr class="border-b border-slate-800">
+            <th class="px-3 py-2 text-left">Дней до конца цикла</th>
+            <th class="px-3 py-2 text-left">Пропорционально</th>
+            <th class="px-3 py-2 text-left">Фиксированная</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ex in preview_examples %}
+          <tr class="border-b border-slate-900">
+            <td class="px-3 py-2">{{ ex.days_left }} / {{ ex.days_in_cycle }}</td>
+            <td class="px-3 py-2 {% if price_mode != 'fixed' %}font-semibold text-cyan-300{% endif %}">{{ ex.prorated_price }} ₽</td>
+            <td class="px-3 py-2 {% if price_mode == 'fixed' %}font-semibold text-cyan-300{% endif %}">{{ ex.fixed_price }} ₽</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-3 text-xs text-slate-500">Текущий выбранный режим выделен цветом.</div>
+  </div>
+</div>
+{% endblock %}
