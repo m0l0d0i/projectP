@@ -183,6 +183,8 @@ class AuditAction(str, enum.Enum):
     subscription_traffic_reset = 'subscription_traffic_reset'
     subscription_disabled = 'subscription_disabled'
     subscription_enabled = 'subscription_enabled'
+    subscription_tariff_changed = 'subscription_tariff_changed'
+    subscription_url_reissued = 'subscription_url_reissued'
 
 
 class AuditActorType(str, enum.Enum):

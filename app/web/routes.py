@@ -6510,6 +6510,169 @@ async def admin_subscription_enable(
     )
 
 
+def _resolve_tariff_traffic_gb(tariff) -> int | None:
+    """Вернуть «месячный лимит трафика» из тарифа в ГБ.
+
+    Приоритет: `monthly_traffic_gb` (legacy) → `fixed_traffic_gb` →
+    `base_traffic_gb`. None означает безлимит (Marzban data_limit=0).
+    """
+    for attr in ('monthly_traffic_gb', 'fixed_traffic_gb', 'base_traffic_gb'):
+        value = getattr(tariff, attr, None)
+        if value is not None:
+            return int(value)
+    return None
+
+
+@router.post('/admin/subscriptions/{subscription_id}/change-tariff', dependencies=[Depends(require_finance_or_support)])
+async def admin_subscription_change_tariff(
+    request: Request,
+    subscription_id: int,
+    tariff_code: str = Form(...),
+    principal: WebAdminPrincipal = Depends(require_finance_or_support),
+):
+    """Сменить тариф подписки (FEA-ADMIN-SUB-CRM #3).
+
+    Подбирает TariffPlan по `code`, считает целевой data_limit (ГБ),
+    делает `safe_modify_user(data_limit=...)` в Marzban, после успеха
+    локально сохраняет `current_tariff_id/code`, `monthly_traffic_bytes`
+    и `data_limit_bytes`. Не меняет expire (для extends — отдельная
+    кнопка); НЕ сбрасывает used_traffic (саппорт может сбросить
+    отдельной кнопкой если нужно).
+    """
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+    redirect = f'/admin/subscriptions/{subscription_id}'
+    normalized_code = (tariff_code or '').strip()
+    if not normalized_code:
+        return _redirect_with_message(redirect, error='Не указан код тарифа')
+
+    sub_view, err = await _load_sub_or_redirect(sessionmaker, subscription_id)
+    if err is not None:
+        return err
+    marzban_username = sub_view['marzban_username']
+
+    async with sessionmaker() as session:
+        tariff = await TariffRepository(session).get_by_code(normalized_code)
+    if tariff is None or not getattr(tariff, 'is_active', True):
+        return _redirect_with_message(redirect, error=f'Тариф «{normalized_code}» не найден или неактивен')
+    if tariff.code == sub_view['current_tariff_code']:
+        return _redirect_with_message(redirect, error='Подписка уже на этом тарифе')
+
+    target_traffic_gb = _resolve_tariff_traffic_gb(tariff)
+    target_data_limit_bytes = (target_traffic_gb or 0) * (1024 ** 3)
+    online_limit = getattr(tariff, 'online_limit_single', None)
+
+    if not settings.marzban_enabled or not marzban_username:
+        return _redirect_with_message(redirect, error='Marzban отключён — смена тарифа невозможна')
+
+    client = MarzbanClient(settings)
+    try:
+        try:
+            payload: dict[str, Any] = {'data_limit': target_data_limit_bytes}
+            if online_limit is not None and settings.marzban_online_limit_field:
+                payload[settings.marzban_online_limit_field] = int(online_limit)
+            await client.safe_modify_user(marzban_username, **payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Marzban change-tariff failed sub_id=%s', subscription_id)
+            return _redirect_with_message(redirect, error=f'Marzban: {exc}')
+    finally:
+        with suppress(Exception):
+            await client.close()
+
+    async with sessionmaker.begin() as session:
+        sub = await SubscriptionRepository(session).get_by_id_for_update(subscription_id)
+        if sub is None:
+            return _redirect_with_message(redirect, error='Подписка пропала между запросами')
+        previous_tariff = sub.current_tariff_code
+        previous_data_limit = sub.data_limit_bytes
+        sub.current_tariff_id = tariff.id
+        sub.current_tariff_code = tariff.code
+        sub.monthly_traffic_bytes = target_data_limit_bytes if target_traffic_gb else None
+        sub.data_limit_bytes = target_data_limit_bytes if target_traffic_gb else None
+        if online_limit is not None:
+            sub.online_limit = int(online_limit)
+        await session.flush()
+        await AuditLogRepository(session).create(
+            action=AuditAction.subscription_tariff_changed,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='subscription',
+            entity_id=str(subscription_id),
+            details={
+                'user_id': sub_view['user_id'],
+                'previous_tariff_code': previous_tariff,
+                'new_tariff_code': tariff.code,
+                'previous_data_limit_bytes': previous_data_limit,
+                'new_data_limit_bytes': target_data_limit_bytes,
+                'marzban_username': marzban_username,
+            },
+        )
+    return _redirect_with_message(redirect, success=f'Тариф изменён на «{tariff.code}»')
+
+
+@router.post('/admin/subscriptions/{subscription_id}/reissue-url', dependencies=[Depends(require_support)])
+async def admin_subscription_reissue_url(
+    request: Request,
+    subscription_id: int,
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    """Перевыпустить subscription URL (FEA-ADMIN-SUB-CRM #3).
+
+    Marzban: `POST /api/user/{username}/revoke_sub` — старая ссылка
+    становится невалидной, выдаётся новая. После успеха локально
+    обновляется `subscription.subscription_url`.
+    """
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+    redirect = f'/admin/subscriptions/{subscription_id}'
+
+    sub_view, err = await _load_sub_or_redirect(sessionmaker, subscription_id)
+    if err is not None:
+        return err
+    marzban_username = sub_view['marzban_username']
+
+    if not settings.marzban_enabled or not marzban_username:
+        return _redirect_with_message(redirect, error='Marzban отключён — re-issue невозможен')
+
+    client = MarzbanClient(settings)
+    try:
+        try:
+            remote = await client.revoke_subscription_url(marzban_username)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception('Marzban revoke_subscription_url failed sub_id=%s', subscription_id)
+            return _redirect_with_message(redirect, error=f'Marzban: {exc}')
+    finally:
+        with suppress(Exception):
+            await client.close()
+
+    new_url = getattr(remote, 'subscription_url', None)
+
+    async with sessionmaker.begin() as session:
+        sub = await SubscriptionRepository(session).get_by_id_for_update(subscription_id)
+        if sub is None:
+            return _redirect_with_message(redirect, error='Подписка пропала между запросами')
+        previous_url = sub.subscription_url
+        if new_url:
+            sub.subscription_url = new_url
+        await session.flush()
+        await AuditLogRepository(session).create(
+            action=AuditAction.subscription_url_reissued,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='subscription',
+            entity_id=str(subscription_id),
+            details={
+                'user_id': sub_view['user_id'],
+                'marzban_username': marzban_username,
+                'previous_url_present': bool(previous_url),
+                'new_url_present': bool(new_url),
+            },
+        )
+    return _redirect_with_message(redirect, success='Subscription URL перевыпущен')
+
+
 @router.get('/admin/promocodes/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_promocodes(
     request: Request,

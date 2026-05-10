@@ -99,6 +99,38 @@
       </form>
     </div>
 
+    {# FEA-ADMIN-SUB-CRM #3 #}
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">🔄 Сменить тариф</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Marzban: <code>safe_modify_user(data_limit=новый_лимит)</code>;
+        локально обновляются <code>current_tariff_id/code</code>,
+        <code>monthly_traffic_bytes</code>, <code>data_limit_bytes</code> и
+        <code>online_limit</code> (из тарифа). Не трогает <code>expire_date</code>
+        и не сбрасывает used_traffic — для этого отдельные кнопки.
+      </p>
+      <form method="post" action="/admin/subscriptions/{{ sub.id }}/change-tariff" class="mt-4 grid gap-3 sm:grid-cols-3" data-confirm="Сменить тариф подписки {{ sub.service_id }}?">
+        {{ csrf_input(request)|safe }}
+        <select name="tariff_code" required class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white sm:col-span-2">
+          {% for t in tariff_options %}<option value="{{ t.code }}" {% if t.code == sub.tariff_code %}selected{% endif %}>{{ t.title }} ({{ t.code }})</option>{% endfor %}
+        </select>
+        <button type="submit" class="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Применить</button>
+      </form>
+    </div>
+
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-white">🔁 Перевыпустить URL</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Marzban: <code>POST /api/user/{username}/revoke_sub</code>. Старая
+        ссылка перестаёт работать; саппорт пересылает пользователю новую.
+        Локально обновится <code>subscription.subscription_url</code>.
+      </p>
+      <form method="post" action="/admin/subscriptions/{{ sub.id }}/reissue-url" class="mt-4" data-confirm="Перевыпустить subscription URL? Старая ссылка станет невалидной.">
+        {{ csrf_input(request)|safe }}
+        <button type="submit" class="rounded-xl border border-violet-500/40 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-200">🔁 Re-issue subscription URL</button>
+      </form>
+    </div>
+
     <div class="rounded-3xl border {% if sub.is_active %}border-slate-800 bg-slate-900/70{% else %}border-emerald-500/40 bg-emerald-500/5{% endif %} p-6 shadow-xl">
       <h2 class="text-xl font-semibold text-white">{% if sub.is_active %}⛔ Отключить{% else %}✓ Включить{% endif %} подписку</h2>
       <p class="mt-1 text-xs text-slate-500">

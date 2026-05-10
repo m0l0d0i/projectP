@@ -1129,6 +1129,17 @@ class MarzbanClient:
         response = await self._request('POST', f'/api/user/{username}/reset')
         return self._parse_user(response.json())
 
+    async def revoke_subscription_url(self, username: str) -> MarzbanUser:
+        """Перевыпустить subscription URL (Marzban POST /api/user/{u}/revoke_sub).
+
+        Используется FEA-ADMIN-SUB-CRM #3 «Re-issue URL» — старая ссылка
+        перестаёт быть валидной, пользователь получает новую (саппорт
+        пересылает). Marzban перегенерирует токен и возвращает обновлённого
+        user'а с новым `subscription_url`.
+        """
+        response = await self._request('POST', f'/api/user/{username}/revoke_sub')
+        return self._parse_user(response.json())
+
     async def reset_user_traffic(self, username: str) -> MarzbanUser:
         """Compatibility alias for resetting used traffic to zero."""
         return await self.reset_user_usage(username)
