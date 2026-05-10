@@ -1714,3 +1714,59 @@ class LLMConfig(TimestampMixin, Base):
         ForeignKey('web_admin_users.id', ondelete='SET NULL'),
         nullable=True,
     )
+
+
+class AdminDmMessage(TimestampMixin, Base):
+    """История DM-сообщений, отправленных пользователю из web-admin
+    (FEA-ADMIN-USER-CRM #3).
+
+    Текст сохраняется в БД (для timeline + аудита спорных случаев).
+    Доставка идёт через `outbox_messages` (атомарно, with retry); поле
+    `outbox_message_id` ссылается на ту запись, чтобы из админки можно
+    было увидеть финальный статус доставки.
+
+    `status` отражает последнее известное состояние с точки зрения
+    composer'а: queued (поставлено в outbox), sent (outbox сообщил
+    об успехе — пока обновляется только из admin-handler'а на основе
+    fact-of-enqueue, dispatcher статус не пробрасывается обратно),
+    failed (enqueue не удался — например, бот блокирован пользователем).
+    """
+
+    __tablename__ = 'admin_dm_messages'
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(trim(text)) > 0",
+            name='ck_admin_dm_messages_text_not_blank',
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'sent', 'failed')",
+            name='ck_admin_dm_messages_status_valid',
+        ),
+        Index(
+            'ix_admin_dm_messages_user_created',
+            'user_id',
+            sa_text('created_at DESC'),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    admin_id: Mapped[int | None] = mapped_column(
+        ForeignKey('web_admin_users.id', ondelete='SET NULL'),
+        nullable=True,
+    )
+    admin_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default='queued',
+        server_default=sa_text("'queued'"),
+    )
+    outbox_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey('outbox_messages.id', ondelete='SET NULL'),
+        nullable=True,
+    )

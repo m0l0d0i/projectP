@@ -25,6 +25,7 @@ from app.db.models import (
     BroadcastJobStatus,
     CannedResponse,
     Invoice,
+    AdminDmMessage,
     InvoicePurpose,
     InvoiceStatus,
     LLMConfig,
@@ -3410,9 +3411,97 @@ class AuditLogRepository:
         )
         return list(res.scalars().all())
 
+    async def list_for_user(
+        self,
+        user_id: int,
+        *,
+        limit: int = 50,
+    ) -> list[AuditLog]:
+        """События, относящиеся к user (entity_type='user' или
+        entity_type='subscription' с user_id в details). Используется
+        для communication timeline на странице пользователя.
+
+        В первой итерации фильтруем только по `entity_type='user'` и
+        `entity_id=user_id` — этого достаточно для основных действий
+        (block/notes/tags/trial/balance). subscription-action audit
+        пишется с `entity_type='subscription'`, `entity_id=sub_id` и
+        `details.user_id` — их добавим в timeline отдельным запросом.
+        """
+        res = await self.session.execute(
+            select(AuditLog)
+            .where(
+                AuditLog.entity_type == 'user',
+                AuditLog.entity_id == str(user_id),
+            )
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(limit)
+        )
+        return list(res.scalars().all())
+
     async def count(self) -> int:
         res = await self.session.execute(select(func.count(AuditLog.id)))
         return int(res.scalar_one())
+
+
+class AdminDmMessageRepository:
+    """История DM-сообщений из web-admin (FEA-ADMIN-USER-CRM #3).
+
+    Создание идёт ПАРОЙ с outbox-enqueue в одной транзакции — `create`
+    принимает уже полученный `outbox_message_id` (или None при failure).
+    Это даёт нам atomic «или DM записан и в outbox, или ни там, ни там».
+    """
+
+    MAX_TEXT_LENGTH = 4000  # лимит Telegram — 4096; оставляем запас на форматирование
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    @classmethod
+    def _normalize_text(cls, value: str) -> str:
+        normalized = (value or '').strip()
+        if not normalized:
+            raise ValueError('Текст DM не может быть пустым')
+        if len(normalized) > cls.MAX_TEXT_LENGTH:
+            raise ValueError(f'Текст DM длиннее {cls.MAX_TEXT_LENGTH} символов — Telegram не примет')
+        return normalized
+
+    async def create(
+        self,
+        *,
+        user_id: int,
+        text: str,
+        status: str,
+        admin_id: int | None,
+        admin_username: str | None,
+        outbox_message_id: int | None,
+    ) -> AdminDmMessage:
+        if status not in {'queued', 'sent', 'failed'}:
+            raise ValueError(f'Неизвестный status: {status!r}')
+        row = AdminDmMessage(
+            user_id=int(user_id),
+            text=self._normalize_text(text),
+            status=status,
+            admin_id=int(admin_id) if admin_id is not None else None,
+            admin_username=_normalize_optional_str(admin_username),
+            outbox_message_id=int(outbox_message_id) if outbox_message_id is not None else None,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def list_by_user(
+        self,
+        user_id: int,
+        *,
+        limit: int = 50,
+    ) -> list[AdminDmMessage]:
+        res = await self.session.execute(
+            select(AdminDmMessage)
+            .where(AdminDmMessage.user_id == int(user_id))
+            .order_by(AdminDmMessage.created_at.desc(), AdminDmMessage.id.desc())
+            .limit(int(limit))
+        )
+        return list(res.scalars().all())
 
 
 class WebAdminUserRepository:

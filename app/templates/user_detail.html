@@ -361,6 +361,67 @@
     </div>
   </div>
 
+  {# FEA-ADMIN-USER-CRM #3: DM-композер #}
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="text-xl font-semibold text-white">📨 Отправить DM пользователю</h2>
+    </div>
+    <p class="mt-2 text-sm text-slate-400">
+      Сообщение уйдёт в общий outbox с retry/backoff (как и push-уведомления).
+      История DM сохраняется в таблице <code>admin_dm_messages</code>; в audit пишется только длина текста.
+      {% if user.bot_blocked %}<br><span class="text-amber-300">⚠️ Пользователь заблокировал бота — сообщение скорее всего не дойдёт.</span>{% endif %}
+    </p>
+    <form method="post" action="/admin/users/{{ user.id }}/dm" class="mt-4 space-y-3">
+      {{ csrf_input(request)|safe }}
+      <textarea name="text" rows="4" maxlength="4000" required placeholder="Текст для пользователя (≤ 4000 символов)" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"></textarea>
+      <button type="submit" class="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Отправить DM</button>
+    </form>
+    {% if dms %}
+    <div class="mt-6 space-y-2">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Последние {{ dms|length }} DM</div>
+      {% for dm in dms %}
+      <details class="rounded-2xl border border-slate-800 bg-slate-950 p-3">
+        <summary class="cursor-pointer text-sm text-slate-200">
+          {{ dm.created_at }} · {{ dm.admin_username }} ·
+          {% if dm.status == 'queued' %}<span class="text-cyan-300">queued</span>{% elif dm.status == 'sent' %}<span class="text-emerald-300">sent</span>{% else %}<span class="text-rose-300">failed</span>{% endif %}
+          {% if dm.outbox_message_id %}<span class="ml-1 text-xs text-slate-500">outbox #{{ dm.outbox_message_id }}</span>{% endif %}
+        </summary>
+        <pre class="mt-2 whitespace-pre-wrap break-words rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs leading-5 text-slate-200">{{ dm.text }}</pre>
+      </details>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {# FEA-ADMIN-USER-CRM #3: communication timeline #}
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="text-xl font-semibold text-white">🕘 Communication timeline</h2>
+      <button type="button" class="help-dot" data-tooltip="Объединённая хронология: тикеты, DM, счета и admin-действия. Сортировка по дате; до 60 последних событий." aria-label="Подсказка по timeline">?</button>
+    </div>
+    <p class="mt-2 text-xs text-slate-500">
+      Тикеты, DM, счета и admin-действия в одной ленте. Полные тикеты — кликом по ссылке.
+    </p>
+    {% if timeline %}
+    <ol class="mt-4 space-y-2">
+      {% for it in timeline %}
+      <li class="flex flex-col gap-1 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div class="min-w-0">
+          <div class="text-sm font-semibold
+            {% if it.tone == 'emerald' %}text-emerald-300{% elif it.tone == 'amber' %}text-amber-300{% elif it.tone == 'rose' %}text-rose-300{% elif it.tone == 'cyan' %}text-cyan-300{% else %}text-slate-200{% endif %}">
+            {% if it.link %}<a href="{{ it.link }}" class="hover:underline">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %}
+          </div>
+          {% if it.subtitle %}<div class="mt-1 break-words text-xs text-slate-400">{{ it.subtitle }}</div>{% endif %}
+        </div>
+        <div class="shrink-0 text-xs text-slate-500">{{ it.created_at_label or '—' }}</div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="mt-3 text-sm text-slate-500">Событий пока нет.</p>
+    {% endif %}
+  </div>
+
   <div class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
     <div class="border-b border-slate-800 px-6 py-5">
       <div class="flex flex-wrap items-center gap-3">

@@ -10,6 +10,7 @@ import io
 import os
 import re
 import ipaddress
+import secrets
 import shlex
 import shutil
 import tempfile
@@ -44,6 +45,7 @@ from app.db.models import (
     WebAdminRole,
 )
 from app.db.repositories import (
+    AdminDmMessageRepository,
     AppLinkRepository,
     AppSettingsRepository,
     AuditLogRepository,
@@ -53,6 +55,7 @@ from app.db.repositories import (
     LLMConfigRepository,
     MarzbanPageSettingsRepository,
     NotificationRuleRepository,
+    OutboxRepository,
     PricingRuleRepository,
     TrafficTopupOptionRepository,
     PromoRepository,
@@ -2544,6 +2547,33 @@ async def admin_users(request: Request, q: str | None = Query(default=None), pag
     )
 
 
+_USER_TIMELINE_LIMIT = 60
+_USER_DM_LIMIT = 25
+_USER_TICKETS_LIMIT = 25
+_USER_AUDIT_LIMIT = 50
+
+
+_AUDIT_TIMELINE_LABELS: dict[str, str] = {
+    'user_notes_updated': '📝 Заметки админа обновлены',
+    'user_tag_added': '🏷 Добавлен тег',
+    'user_tag_removed': '🏷 Удалён тег',
+    'user_blocked': '🚫 Пользователь заблокирован',
+    'user_unblocked': '✓ Пользователь разблокирован',
+    'user_trial_reset': '↻ Trial сброшен',
+    'user_admin_dm_sent': '📨 Отправлен DM из админки',
+    'user_force_subscription_disabled': '⛔ Подписка отключена',
+    'balance_adjusted': '💰 Корректировка баланса',
+    'referral_activated': '🤝 Реферал активирован',
+    'promo_redeemed': '🎁 Промокод применён',
+    'invoice_paid': '✅ Счёт оплачен',
+    'invoice_cancelled': '❌ Счёт отменён',
+    'ticket_closed': '✅ Тикет закрыт',
+    'ticket_assigned': '👤 Тикет назначен',
+    'ticket_tagged': '🏷 Тег тикета',
+    'support_ai_generated': '🤖 AI-черновик ответа',
+}
+
+
 @router.get('/admin/users/{user_id}', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_user_detail(request: Request, user_id: int):
     templates = request.app.state.templates
@@ -2553,11 +2583,17 @@ async def admin_user_detail(request: Request, user_id: int):
         user_repo = UserRepository(session)
         subscription_repo = SubscriptionRepository(session)
         invoice_repo = InvoiceRepository(session)
+        ticket_repo = SupportTicketRepository(session)
+        dm_repo = AdminDmMessageRepository(session)
+        audit_repo = AuditLogRepository(session)
         user = await user_repo.get_by_id(user_id)
         if user is None:
             raise HTTPException(status_code=404, detail='User not found')
         subscriptions_raw = await subscription_repo.list_by_user_id(user_id)
         invoices_raw = await invoice_repo.list_by_user_id(user_id, limit=100)
+        tickets_raw = await ticket_repo.list_by_user(user_id)
+        dms_raw = await dm_repo.list_by_user(user_id, limit=_USER_DM_LIMIT)
+        audit_raw = await audit_repo.list_for_user(user_id, limit=_USER_AUDIT_LIMIT)
 
     subscriptions = []
     for sub in subscriptions_raw:
@@ -2598,6 +2634,26 @@ async def admin_user_detail(request: Request, user_id: int):
             )
         )
 
+    dms = [
+        SimpleNamespace(
+            id=dm.id,
+            text=dm.text,
+            status=dm.status,
+            admin_username=dm.admin_username or '—',
+            created_at=format_dt(dm.created_at),
+            outbox_message_id=dm.outbox_message_id,
+        )
+        for dm in dms_raw
+    ]
+
+    timeline = _build_user_timeline(
+        user_id=user_id,
+        invoices_raw=invoices_raw,
+        tickets_raw=tickets_raw,
+        dms_raw=dms_raw,
+        audit_raw=audit_raw,
+    )
+
     return templates.TemplateResponse(
         request,
         'user_detail.html',
@@ -2624,10 +2680,114 @@ async def admin_user_detail(request: Request, user_id: int):
             ),
             'subscriptions': subscriptions,
             'invoices': invoices,
+            'dms': dms,
+            'timeline': timeline,
             'success_message': request.query_params.get('success'),
             'error_message': request.query_params.get('error'),
         },
     )
+
+
+def _build_user_timeline(
+    *,
+    user_id: int,
+    invoices_raw: list,
+    tickets_raw: list,
+    dms_raw: list,
+    audit_raw: list,
+) -> list[SimpleNamespace]:
+    """Собрать communication timeline для страницы пользователя.
+
+    Источники:
+    - DM-сообщения из `admin_dm_messages` (`kind='dm'`).
+    - Тикеты саппорта (`kind='ticket'`).
+    - Счета (`kind='invoice'`).
+    - Audit-логи с `entity_type='user'` для этого пользователя
+      (`kind='audit'`).
+
+    Каждая запись — SimpleNamespace с одинаковым набором полей:
+    `kind`, `created_at_label`, `created_at` (для сортировки),
+    `title`, `subtitle`, `link` (опционально), `tone` (cyan/amber/
+    rose/emerald/slate). Сортировка — по created_at desc; срезаем
+    до `_USER_TIMELINE_LIMIT`.
+    """
+    items: list[SimpleNamespace] = []
+
+    for dm in dms_raw:
+        tone = 'amber' if dm.status == 'failed' else ('emerald' if dm.status == 'sent' else 'cyan')
+        items.append(
+            SimpleNamespace(
+                kind='dm',
+                created_at=dm.created_at,
+                created_at_label=format_dt(dm.created_at),
+                title=f'📨 DM от {dm.admin_username or "—"} ({dm.status})',
+                subtitle=(dm.text or '')[:200] + ('…' if dm.text and len(dm.text) > 200 else ''),
+                link=None,
+                tone=tone,
+            )
+        )
+
+    for ticket in tickets_raw:
+        status_value = getattr(getattr(ticket, 'status', None), 'value', getattr(ticket, 'status', None))
+        tone = 'emerald' if status_value == 'closed' else ('amber' if status_value == 'waiting_operator' else 'cyan')
+        items.append(
+            SimpleNamespace(
+                kind='ticket',
+                created_at=ticket.created_at,
+                created_at_label=format_dt(ticket.created_at),
+                title=f'🎫 Тикет #{ticket.id} ({status_value or "—"})',
+                subtitle=getattr(ticket, 'hashtag', None) or '',
+                link=f'/admin/tickets/{ticket.id}',
+                tone=tone,
+            )
+        )
+
+    for invoice in invoices_raw:
+        status_value = getattr(getattr(invoice, 'status', None), 'value', getattr(invoice, 'status', None)) or '—'
+        purpose_value = getattr(getattr(invoice, 'purpose', None), 'value', getattr(invoice, 'purpose', None)) or '—'
+        tone = (
+            'emerald' if status_value in {'paid', 'consumed'} else
+            'rose' if status_value == 'cancelled' else
+            'cyan'
+        )
+        items.append(
+            SimpleNamespace(
+                kind='invoice',
+                created_at=invoice.created_at,
+                created_at_label=format_dt(invoice.created_at),
+                title=f'💳 Счёт #{invoice.id} · {purpose_value} · {status_value}',
+                subtitle=f'{getattr(invoice, "payable_amount", "—")} {getattr(invoice, "currency", "")}',
+                link=None,
+                tone=tone,
+            )
+        )
+
+    for log in audit_raw:
+        action_value = getattr(getattr(log, 'action', None), 'value', getattr(log, 'action', None)) or 'admin_action'
+        title = _AUDIT_TIMELINE_LABELS.get(action_value, f'⚙️ {action_value}')
+        actor = getattr(log, 'actor_username', None) or '—'
+        details = getattr(log, 'details', None) or {}
+        # короткое summary деталей (до 160 символов) — без рекурсивного дампа JSON
+        if isinstance(details, dict):
+            summary_parts = [f'{k}={v}' for k, v in details.items() if k not in {'method', 'role', 'is_legacy', 'client_ip'}]
+            subtitle = '; '.join(summary_parts)[:160]
+        else:
+            subtitle = ''
+        items.append(
+            SimpleNamespace(
+                kind='audit',
+                created_at=log.created_at,
+                created_at_label=format_dt(log.created_at),
+                title=f'{title} · {actor}',
+                subtitle=subtitle,
+                link=None,
+                tone='slate',
+            )
+        )
+
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    items.sort(key=lambda it: (it.created_at or epoch), reverse=True)
+    return items[:_USER_TIMELINE_LIMIT]
 
 
 @router.post('/admin/users/{user_id}/notes', dependencies=[Depends(require_support)])
@@ -2806,6 +2966,74 @@ async def admin_user_reset_trial(
             details={'previous_trial_issued_at': previous_at.isoformat() if previous_at else None},
         )
     return _redirect_with_message(redirect, success='Trial сброшен — пользователь сможет получить новый')
+
+
+@router.post('/admin/users/{user_id}/dm', dependencies=[Depends(require_support)])
+async def admin_user_send_dm(
+    request: Request,
+    user_id: int,
+    text: str = Form(...),
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    """Отправить DM из админки. Атомарно создаёт запись в
+    `admin_dm_messages` и enqueue в `outbox_messages` (доставка через
+    общий outbox-worker с retry/backoff). Status DM-записи — `queued`;
+    обновляется до `failed`, если outbox.enqueue вернёт None
+    (correlation-key-конфликт ИЛИ другой сбой).
+    """
+    sessionmaker = request.app.state.sessionmaker
+    redirect = f'/admin/users/{user_id}'
+    try:
+        normalized_text = AdminDmMessageRepository._normalize_text(text)
+    except ValueError as exc:
+        return _redirect_with_message(redirect, error=str(exc))
+
+    correlation_key = f'admin_dm:{user_id}:{int(time.time() * 1000)}:{secrets.token_hex(4)}'
+
+    async with sessionmaker.begin() as session:
+        user_repo = UserRepository(session)
+        outbox_repo = OutboxRepository(session)
+        dm_repo = AdminDmMessageRepository(session)
+        audit_repo = AuditLogRepository(session)
+
+        user = await user_repo.get_by_id(user_id)
+        if user is None:
+            return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+
+        outbox_row = await outbox_repo.enqueue_tg_message(
+            chat_id=user.tg_id,
+            text=normalized_text,
+            user_id=user.id,
+            correlation_key=correlation_key,
+        )
+        status = 'queued' if outbox_row is not None else 'failed'
+
+        dm_row = await dm_repo.create(
+            user_id=user.id,
+            text=normalized_text,
+            status=status,
+            admin_id=principal.db_id,
+            admin_username=principal.username,
+            outbox_message_id=outbox_row.id if outbox_row is not None else None,
+        )
+        await audit_repo.create(
+            action=AuditAction.user_admin_dm_sent,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='user',
+            entity_id=str(user_id),
+            details={
+                'dm_id': dm_row.id,
+                'text_len': len(normalized_text),
+                'status': status,
+                'outbox_message_id': outbox_row.id if outbox_row is not None else None,
+            },
+        )
+
+    if status == 'failed':
+        return _redirect_with_message(redirect, error='Не удалось поставить DM в очередь — проверьте логи')
+    return _redirect_with_message(redirect, success='DM поставлен в очередь outbox')
 
 
 @router.post(
