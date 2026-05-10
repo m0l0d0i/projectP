@@ -160,6 +160,7 @@ class AuditAction(str, enum.Enum):
     traffic_topup_option_toggled = 'traffic_topup_option_toggled'
     mid_cycle_device_settings_updated = 'mid_cycle_device_settings_updated'
     web_admin_action = 'web_admin_action'
+    referral_settings_updated = 'referral_settings_updated'
     ticket_assigned = 'ticket_assigned'
     ticket_tagged = 'ticket_tagged'
     canned_response_created = 'canned_response_created'
@@ -962,6 +963,14 @@ class AppSettings(TimestampMixin, Base):
             'mid_cycle_device_fixed_price >= 0',
             name='ck_app_settings_mid_cycle_device_fixed_price_non_negative',
         ),
+        CheckConstraint(
+            'referral_inviter_bonus >= 0',
+            name='ck_app_settings_referral_inviter_bonus_non_negative',
+        ),
+        CheckConstraint(
+            'referral_invited_bonus >= 0',
+            name='ck_app_settings_referral_invited_bonus_non_negative',
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1, server_default=sa_text('1'))
@@ -1033,6 +1042,18 @@ class AppSettings(TimestampMixin, Base):
         nullable=False,
         default=Decimal('99.00'),
         server_default=sa_text('99.00'),
+    )
+    referral_inviter_bonus: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal('50.00'),
+        server_default=sa_text('50.00'),
+    )
+    referral_invited_bonus: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal('50.00'),
+        server_default=sa_text('50.00'),
     )
 
 

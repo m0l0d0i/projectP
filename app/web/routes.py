@@ -4939,6 +4939,60 @@ async def admin_canned_responses_delete(
     return _redirect_with_message(redirect, success=f'Шаблон «{code}» удалён')
 
 
+@router.get('/admin/referrals/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
+async def admin_referrals(request: Request):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+    async with sessionmaker() as session:
+        row = await AppSettingsRepository(session).ensure()
+    return templates.TemplateResponse(
+        request,
+        'admin_referrals.html',
+        {
+            'current_page': 'referrals',
+            'inviter_bonus': row.referral_inviter_bonus,
+            'invited_bonus': row.referral_invited_bonus,
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+@router.post('/admin/referrals/', dependencies=[Depends(require_finance)])
+async def admin_referrals_update(
+    request: Request,
+    inviter_bonus: str = Form(...),
+    invited_bonus: str = Form(...),
+    principal: WebAdminPrincipal = Depends(require_finance),
+):
+    sessionmaker = request.app.state.sessionmaker
+    redirect = '/admin/referrals/'
+    async with sessionmaker.begin() as session:
+        repo = AppSettingsRepository(session)
+        row = await repo.ensure()
+        try:
+            await repo.update_referral_settings(
+                row,
+                inviter_bonus=inviter_bonus.strip().replace(',', '.'),
+                invited_bonus=invited_bonus.strip().replace(',', '.'),
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect, error=str(exc))
+        await AuditLogRepository(session).create(
+            action=AuditAction.referral_settings_updated,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='app_settings',
+            entity_id='1',
+            details={
+                'inviter_bonus': str(row.referral_inviter_bonus),
+                'invited_bonus': str(row.referral_invited_bonus),
+            },
+        )
+    return _redirect_with_message(redirect, success='Бонусы реферальной программы обновлены')
+
+
 @router.get('/admin/promocodes/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_promocodes(
     request: Request,

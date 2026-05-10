@@ -548,6 +548,25 @@ class AppSettingsRepository:
         await self.session.flush()
         return row
 
+    async def update_referral_settings(
+        self,
+        row: AppSettings,
+        *,
+        inviter_bonus: Decimal | int | float | str,
+        invited_bonus: Decimal | int | float | str,
+    ) -> AppSettings:
+        try:
+            normalized_inviter = Decimal(str(inviter_bonus)).quantize(Decimal('0.01'))
+            normalized_invited = Decimal(str(invited_bonus)).quantize(Decimal('0.01'))
+        except Exception as exc:
+            raise ValueError('Бонусы должны быть числами') from exc
+        if normalized_inviter < 0 or normalized_invited < 0:
+            raise ValueError('Бонусы должны быть ≥ 0')
+        row.referral_inviter_bonus = normalized_inviter
+        row.referral_invited_bonus = normalized_invited
+        await self.session.flush()
+        return row
+
     async def update_mid_cycle_device_settings(
         self,
         row: AppSettings,

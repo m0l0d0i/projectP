@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Реферальная программа{% endblock %}
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Реферальная программа</div>
+      <h1 class="mt-4 text-3xl font-bold text-white">Реферальные бонусы</h1>
+      <p class="mt-2 text-slate-400">
+        Размер начислений (FEA-A6) обоим участникам после первой оплаты приглашённого.
+        Бонусы кладутся на <span class="text-slate-200">User.balance</span> и могут быть только списаны при покупке (D3: вывод запрещён).
+      </p>
+    </div>
+    <a href="/admin/system/" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white">← На главную</a>
+  </div>
+
+  {% if success_message %}<div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">✅ {{ success_message }}</div>{% endif %}
+  {% if error_message %}<div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">❌ {{ error_message }}</div>{% endif %}
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Бонус пригласившему</div>
+      <div class="mt-2 text-3xl font-semibold text-emerald-300">{{ inviter_bonus }} ₽</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Бонус приглашённому</div>
+      <div class="mt-2 text-3xl font-semibold text-cyan-300">{{ invited_bonus }} ₽</div>
+    </div>
+  </div>
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <h2 class="text-xl font-semibold text-white">Настройки</h2>
+    <p class="mt-2 text-sm text-slate-400">
+      Установите 0, чтобы отключить начисление одной из сторон. Изменения применяются ко всем будущим активациям;
+      уже начисленные бонусы не пересчитываются.
+    </p>
+    <form method="post" action="/admin/referrals/" class="mt-4 grid gap-4 sm:grid-cols-3">
+      {{ csrf_input(request)|safe }}
+      <label class="flex flex-col gap-1 text-sm text-slate-300">
+        <span class="text-xs uppercase tracking-wider text-slate-500">Inviter bonus, ₽</span>
+        <input name="inviter_bonus" value="{{ inviter_bonus }}" required class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+      </label>
+      <label class="flex flex-col gap-1 text-sm text-slate-300">
+        <span class="text-xs uppercase tracking-wider text-slate-500">Invited bonus, ₽</span>
+        <input name="invited_bonus" value="{{ invited_bonus }}" required class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+      </label>
+      <div class="flex items-end">
+        <button type="submit" class="w-full rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

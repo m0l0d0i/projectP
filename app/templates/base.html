@@ -25,6 +25,7 @@
     'web_admins': 'Веб-админы',
     'whoami': 'Кто я',
     'canned_responses': 'Шаблоны ответов',
+    'referrals': 'Реферальная программа',
     'broadcasts': 'Рассылки',
     'promocodes': 'Промокоды',
     'marzban_page': 'Страница подписки Marzban',
@@ -51,6 +52,7 @@
     'web_admins': 'Веб-админы и RBAC-роли (FEA-C39): CRUD, матрица прав, audit на каждый mutation.',
     'whoami': 'Текущая роль и список разрешённых разделов админки.',
     'canned_responses': 'Шаблоны быстрых ответов саппорта (FEA-C31): CRUD, теги, usage_count.',
+    'referrals': 'Размер inviter/invited бонусов реферальной программы (FEA-A6).',
     'broadcasts': 'Черновики, отложенные и выполненные рассылки с контентом и кнопками.',
     'promocodes': 'Создание, изменение, архив и контроль использования промокодов.',
     'marzban_page': 'Редактирование, preview и безопасное применение live-страницы Marzban.',
@@ -149,6 +151,10 @@
 
           <a href="/admin/promocodes/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'promocodes' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
             Промокоды
+          </a>
+
+          <a href="/admin/referrals/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'referrals' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
+            Реферальная программа
           </a>
         </div>
 

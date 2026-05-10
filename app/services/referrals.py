@@ -6,8 +6,16 @@ from decimal import Decimal
 from sqlalchemy import func, select
 
 from app.db.models import AuditAction, AuditActorType, Referral, ReferralSource, TransactionType
-from app.db.repositories import AuditLogRepository, ReferralRepository, TransactionRepository, UserRepository
+from app.db.repositories import (
+    AppSettingsRepository,
+    AuditLogRepository,
+    ReferralRepository,
+    TransactionRepository,
+    UserRepository,
+)
 
+# FEA-A6: legacy default — используется только если AppSettings.ensure() сбоит.
+# Реальные значения берём из AppSettings.referral_inviter_bonus / _invited_bonus.
 REF_BONUS = Decimal('50.00')
 
 
@@ -18,6 +26,17 @@ class ReferralService:
         self.referrals = ReferralRepository(session)
         self.transactions = TransactionRepository(session)
         self.audit = AuditLogRepository(session)
+        self.app_settings = AppSettingsRepository(session)
+
+    async def _load_bonuses(self) -> tuple[Decimal, Decimal]:
+        """FEA-A6: динамические бонусы из AppSettings."""
+        try:
+            row = await self.app_settings.ensure()
+        except Exception:
+            return REF_BONUS, REF_BONUS
+        inviter_bonus = Decimal(str(row.referral_inviter_bonus or 0)).quantize(Decimal('0.01'))
+        invited_bonus = Decimal(str(row.referral_invited_bonus or 0)).quantize(Decimal('0.01'))
+        return inviter_bonus, invited_bonus
 
     async def _grant_bonus(self, inviter_id: int, invited_id: int, source: ReferralSource) -> bool:
         inviter = await self.users.get_by_id_for_update(inviter_id)
@@ -26,16 +45,20 @@ class ReferralService:
         if not inviter or not invited or not referral or referral.is_activated:
             return False
 
-        await self.users.add_balance(inviter, REF_BONUS)
-        await self.users.add_balance(invited, REF_BONUS)
-        await self.transactions.create(
-            inviter.id,
-            REF_BONUS,
-            TransactionType.income,
-            f'Рефералка: бонус за приглашенного #{invited.tg_id}',
-        )
-        description = 'Рефералка: бонус по ссылке' if source == ReferralSource.link else 'Рефералка: бонус за ввод промокода'
-        await self.transactions.create(invited.id, REF_BONUS, TransactionType.income, description)
+        inviter_bonus, invited_bonus = await self._load_bonuses()
+
+        if inviter_bonus > 0:
+            await self.users.add_balance(inviter, inviter_bonus)
+            await self.transactions.create(
+                inviter.id,
+                inviter_bonus,
+                TransactionType.income,
+                f'Рефералка: бонус за приглашенного #{invited.tg_id}',
+            )
+        if invited_bonus > 0:
+            await self.users.add_balance(invited, invited_bonus)
+            description = 'Рефералка: бонус по ссылке' if source == ReferralSource.link else 'Рефералка: бонус за ввод промокода'
+            await self.transactions.create(invited.id, invited_bonus, TransactionType.income, description)
 
         referral.is_activated = True
         referral.activated_at = datetime.now(timezone.utc)
@@ -50,7 +73,8 @@ class ReferralService:
                 'source': referral.source.value,
                 'inviter_id': inviter.id,
                 'invited_id': invited.id,
-                'bonus_amount': str(REF_BONUS),
+                'inviter_bonus': str(inviter_bonus),
+                'invited_bonus': str(invited_bonus),
             },
         )
         await self.session.flush()
@@ -124,5 +148,6 @@ class ReferralService:
     async def stats_for_inviter(self, inviter_user_id: int) -> tuple[int, Decimal]:
         invited_count = await self.referrals.count_for_inviter(inviter_user_id)
         activated_count = await self._activated_count_for_inviter(inviter_user_id)
-        referral_balance = (REF_BONUS * activated_count).quantize(Decimal('0.01'))
+        inviter_bonus, _ = await self._load_bonuses()
+        referral_balance = (inviter_bonus * activated_count).quantize(Decimal('0.01'))
         return invited_count, referral_balance
