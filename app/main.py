@@ -29,6 +29,7 @@ from app.handlers import admin_panel, errors, fallback, profile, purchase, rules
 from app.middlewares.anti_spam import AntiSpamMiddleware
 from app.middlewares.blocked import BlockedUserMiddleware
 from app.middlewares.db import DbSessionMiddleware
+from app.middlewares.i18n import I18nMiddleware
 from app.middlewares.services import ServicesMiddleware
 from app.observability.metrics import BOT_UP
 from app.scheduler import SchedulerLeader, build_scheduler
@@ -346,6 +347,7 @@ def _build_dispatcher(settings, marzban, payments, sessionmaker, cache: CacheSer
         cache=cache,
         sessionmaker=sessionmaker,
     )
+    i18n_middleware = I18nMiddleware()
 
     dp.message.middleware(db_middleware)
     dp.callback_query.middleware(db_middleware)
@@ -358,6 +360,9 @@ def _build_dispatcher(settings, marzban, payments, sessionmaker, cache: CacheSer
 
     dp.message.middleware(services_middleware)
     dp.callback_query.middleware(services_middleware)
+
+    dp.message.middleware(i18n_middleware)
+    dp.callback_query.middleware(i18n_middleware)
 
     dp.include_router(start.router)
     dp.include_router(admin_panel.router)
