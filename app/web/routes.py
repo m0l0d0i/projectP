@@ -7218,10 +7218,17 @@ async def admin_broadcasts(
 
     async with sessionmaker() as session:
         repo = BroadcastJobRepository(session)
+        user_repo = UserRepository(session)
         jobs = await _broadcast_list_recent_filtered(repo, limit=ADMIN_PAGE_SIZE, offset=offset, status_filter=status_filter)
         total = await _broadcast_count_filtered(repo, status_filter=status_filter)
         summary_counts = await _broadcast_summary_counts(repo)
         edit_job = await repo.get_by_id(edit_id) if edit_id else None
+        # FEA-ADMIN-CRUD-EXPAND: предпросмотр реальной аудитории.
+        # `count_broadcast_recipients` исключает bot_blocked + is_blocked; это
+        # то же условие, что `broadcast_polling._claim_next_job` использует
+        # для нарезки чанков. Показываем единожды на странице — сегментация
+        # пока не реализована, поэтому число одинаково для всех job'ов.
+        broadcast_recipients_count = await user_repo.count_broadcast_recipients()
 
     rows = [_broadcast_row(job) for job in jobs]
     edit_form = _broadcast_edit_form_defaults(edit_job) if edit_job is not None else {
@@ -7269,6 +7276,7 @@ async def admin_broadcasts(
             'edit_job': edit_job,
             'edit_form': edit_form,
             'preview_payload': preview_payload,
+            'broadcast_recipients_count': broadcast_recipients_count,
             'has_prev': page > 1,
             'has_next': offset + len(jobs) < total,
             'success_message': request.query_params.get('success'),

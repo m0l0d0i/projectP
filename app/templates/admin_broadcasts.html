@@ -81,6 +81,24 @@
     </div>
   </div>
 
+  {% if broadcast_recipients_count is defined %}
+  <div class="rounded-3xl border border-cyan-500/30 bg-cyan-500/5 p-5 shadow-xl">
+    <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div>
+        <div class="text-sm text-cyan-200">
+          📨 Текущая аудитория рассылки
+          <span class="help-dot" data-tooltip="Сколько пользователей реально получит сообщение, если запустить broadcast прямо сейчас. Исключаются users.bot_blocked=true (бот заблокирован клиентом) и users.is_blocked=true (заблокированные админом). Сегментация по типам пользователей пока не реализована — все broadcasts уходят этой аудитории.">?</span>
+        </div>
+        <div class="mt-1 text-3xl font-bold text-white">{{ broadcast_recipients_count }} <span class="text-base font-normal text-slate-400">получателей</span></div>
+      </div>
+      <p class="max-w-md text-xs text-slate-400">
+        Считается на каждый рендер страницы. Исключаются bot_blocked и заблокированные админом пользователи —
+        ровно та же выборка, что использует <code class="rounded bg-slate-900 px-1 py-0.5">broadcast_polling</code>.
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="grid gap-6 xl:grid-cols-3">
     <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl xl:col-span-2">
       <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
