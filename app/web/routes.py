@@ -9073,6 +9073,107 @@ async def legacy_subscription_profile_redirect(request: Request, service_id: str
     )
 
 
+# FEA-B18: маппинг (нижний регистр → каноничный os_name из AppLinkRepository).
+# Порядок проверок важен (iPad detected as iOS, AndroidTV до Android).
+_USER_AGENT_OS_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (('android tv', 'smarttv', 'googletv', 'chromecast'), 'AndroidTV'),
+    (('iphone', 'ipad', 'ipod'), 'iOS'),
+    (('android',), 'Android'),
+    (('mac os x', 'macintosh', 'macos'), 'macOS'),
+    (('windows nt', 'win64', 'win32'), 'Windows'),
+    (('linux',), 'Linux'),
+)
+
+
+def _detect_os_from_user_agent(user_agent: str | None) -> str | None:
+    """Возвращает каноничный `os_name` из AppLink (iOS/Android/...) или None.
+
+    Эвристика по подстрокам User-Agent. None означает, что бот не смог
+    определить ОС — клиент получает grid всех платформ без выделенной кнопки.
+    """
+    if not user_agent:
+        return None
+    haystack = user_agent.lower()
+    for needles, os_name in _USER_AGENT_OS_RULES:
+        if any(needle in haystack for needle in needles):
+            return os_name
+    return None
+
+
+@router.get('/setup/{service_id}', response_class=HTMLResponse)
+async def setup_landing(request: Request, service_id: str):
+    """FEA-B18: публичная landing-страница «Установить на этом устройстве».
+
+    URL `{PUBLIC_BOT_BASE_URL}/setup/{service_id}` открывается из кнопки в
+    боте. Сервер читает User-Agent, определяет ОС, ищет соответствующий
+    AppLink и рендерит страницу с выделенной кнопкой «Установить на этом
+    устройстве» + grid других платформ + ссылку на subscription URL.
+
+    БЕЗ auth — service_id выступает магическим токеном (8 chars из secrets,
+    стат-уникальный). Если не нашли — нейтральная 404-страница без утечки
+    инфы о том, существовал ли token.
+    """
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+    settings = request.app.state.settings
+
+    user_agent = request.headers.get('user-agent') or ''
+    detected_os = _detect_os_from_user_agent(user_agent)
+
+    async with sessionmaker() as session:
+        sub_repo = SubscriptionRepository(session)
+        subscription = await sub_repo.get_by_service_id((service_id or '').strip())
+        if subscription is None:
+            return templates.TemplateResponse(
+                request,
+                'public_404.html',
+                {'bot_username': _bot_username_or_none(settings)},
+                status_code=404,
+            )
+
+        app_links = await AppLinkRepository(session).list_all()
+
+    canonical_subscription_url = build_canonical_subscription_url(
+        getattr(subscription, 'service_id', None),
+        public_origin=configured_public_subscription_origin(settings),
+    )
+
+    link_by_os: dict[str, dict[str, str | None]] = {}
+    for link in app_links:
+        os_key = (link.os_name or '').strip()
+        if not os_key:
+            continue
+        link_by_os[os_key] = {
+            'download_url': _safe_public_url_for_display(link.download_url, field_label='Ссылка на приложение'),
+            'guide_url': _safe_public_url_for_display(link.guide_url, field_label='Ссылка на инструкцию'),
+        }
+
+    detected_link = link_by_os.get(detected_os) if detected_os else None
+
+    fallback_os_cards = [
+        {
+            'os_name': os_name,
+            'download_url': (link_by_os.get(os_name) or {}).get('download_url'),
+            'guide_url': (link_by_os.get(os_name) or {}).get('guide_url'),
+            'is_detected': bool(detected_os) and os_name == detected_os,
+        }
+        for os_name in AppLinkRepository.DEFAULT_OS_NAMES
+    ]
+
+    return templates.TemplateResponse(
+        request,
+        'setup_landing.html',
+        {
+            'detected_os': detected_os,
+            'detected_download_url': (detected_link or {}).get('download_url'),
+            'detected_guide_url': (detected_link or {}).get('guide_url'),
+            'canonical_subscription_url': canonical_subscription_url,
+            'fallback_os_cards': fallback_os_cards,
+            'bot_username': _bot_username_or_none(settings),
+        },
+    )
+
+
 @router.get('/payment/success', response_class=HTMLResponse)
 async def payment_success(request: Request):
     templates = request.app.state.templates

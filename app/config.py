@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     platega_currency: str = 'RUB'
     platega_return_url: str | None = None
     platega_failed_url: str | None = None
+    # FEA-B18 (auto-detect platform): публичный origin, под которым nginx
+    # отдаёт /setup/{service_id} landing-страницу с авто-детектом OS по
+    # User-Agent. Пример: https://bot.svoivpn.xyz. Если None — кнопка
+    # «📱 На этом устройстве» в боте не показывается (graceful fallback на
+    # ручной OS-picker).
+    public_bot_base_url: str | None = None
     platega_timeout_seconds: float = 20.0
     platega_callback_path: str = '/callbacks/platega/payment-status'
     platega_callback_max_body_bytes: int = 64 * 1024
@@ -509,6 +515,11 @@ class Settings(BaseSettings):
     @classmethod
     def validate_platega_public_urls(cls, value: str | None, info) -> str | None:
         return cls._validate_public_https_url(value, field_name=info.field_name.upper())
+
+    @field_validator('public_bot_base_url')
+    @classmethod
+    def validate_public_bot_base_url(cls, value: str | None) -> str | None:
+        return cls._validate_public_https_base_url(value, field_name='PUBLIC_BOT_BASE_URL')
 
     @field_validator('app_port', 'web_admin_port')
     @classmethod
