@@ -390,6 +390,7 @@
         <thead class="bg-slate-900">
           <tr>
             <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Узел</th>
+            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Probe <span class="help-dot" tabindex="0" data-tooltip="Latency и счётчики пользователей панели Marzban — обновляются APScheduler-job probe_nodes_health каждые 90 сек. Users показываются только для default-узла, т.к. Marzban API не даёт per-node breakdown.">?</span></th>
             <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Синхронизация / источник</th>
             <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Policy</th>
             <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Health</th>
@@ -421,6 +422,27 @@
                       <span class="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-300">по умолчанию</span>
                     {% endif %}
                   </div>
+                </td>
+
+                <td class="px-6 py-4 text-sm text-slate-300">
+                  <div class="flex flex-col gap-2">
+                    <span class="inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold {{ row.last_latency_tone if row.last_latency_tone is defined else 'border-slate-700 bg-slate-950 text-slate-400' }}" title="Latency последнего probe-вызова /api/nodes">
+                      ⏱ {{ row.last_latency_label if row.last_latency_label is defined else '—' }}
+                    </span>
+                    <span class="inline-flex items-center rounded-full border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300" title="Активные пользователи / всего пользователей Marzban (только для default-узла)">
+                      👥 {{ row.last_users_label if row.last_users_label is defined else '—' }}
+                    </span>
+                  </div>
+                  <div class="mt-2 text-xs text-slate-500">{{ row.last_probe_at_display if row.last_probe_at_display is defined else 'Не проверялась' }}</div>
+                  {% if row.is_alerting_probe is defined and row.is_alerting_probe %}
+                    <div class="mt-2 inline-flex rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300" title="≥5 подряд fail-probe — отправлен node_down алерт админам">
+                      🚨 alert · fails: {{ row.consecutive_fail_count }}
+                    </div>
+                  {% elif row.is_degraded_probe is defined and row.is_degraded_probe %}
+                    <div class="mt-2 inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300" title="Подряд идущие fail-probe (порог алерта — 5)">
+                      ⚠ fails: {{ row.consecutive_fail_count }}
+                    </div>
+                  {% endif %}
                 </td>
 
                 <td class="px-6 py-4 text-sm text-slate-300">
@@ -469,6 +491,14 @@
 
                 <td class="px-6 py-4">
                   <div class="flex min-w-[220px] flex-col gap-3">
+                    <a
+                      href="/admin/nodes/{{ row.id if row.id is defined else source.id }}"
+                      class="inline-flex w-full items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 hover:border-cyan-400 hover:bg-cyan-500/20 hover:text-white"
+                      title="Открыть детальную карточку узла с графиками probe (latency / users / health)"
+                    >
+                      📈 Детали и графики
+                    </a>
+
                     <form method="post" action="/admin/nodes/" class="space-y-2">
                       <input type="hidden" name="action" value="set_default">
                       <input type="hidden" name="node_id" value="{{ row.id if row.id is defined else source.id }}">
@@ -516,13 +546,13 @@
                     <div class="mt-2 text-xs text-slate-500">{{ node.location_code or 'Не задано' }} • {{ node.provider_name or 'Не задано' }} • {{ node.transport_hint or 'Не задано' }}</div>
                   {% endif %}
                 </td>
-                <td class="px-6 py-4 text-sm text-slate-400" colspan="5">Для полного отображения sync-статусов нужен обновлённый backend `routes.py`.</td>
+                <td class="px-6 py-4 text-sm text-slate-400" colspan="6">Для полного отображения sync-статусов нужен обновлённый backend `routes.py`.</td>
                 <td class="px-6 py-4"></td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="7" class="px-6 py-8 text-center text-sm text-slate-400">
+              <td colspan="8" class="px-6 py-8 text-center text-sm text-slate-400">
                 Узлы пока не добавлены.
               </td>
             </tr>

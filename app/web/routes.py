@@ -854,6 +854,21 @@ def _node_sync_state_tone(value: str | None) -> str:
 
 
 
+def _node_latency_tone(latency_ms: int | None, *, has_probed: bool) -> str:
+    """CSS-классы chip-а под latency (FEA-ADMIN-NODE-MONITOR).
+
+    Пороги выбраны эмпирически для panel-latency (один HTTP-вызов к Marzban):
+    < 200ms нормально, 200–500ms warn, > 500ms slow, fail-probe — alarm.
+    """
+    if not has_probed or latency_ms is None:
+        return 'border-slate-700 bg-slate-950 text-slate-400'
+    if latency_ms < 200:
+        return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+    if latency_ms < 500:
+        return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+    return 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+
+
 def _node_row_for_admin(node: Any) -> dict[str, Any]:
     raw_health = getattr(node, 'health_status', None)
     raw_source = getattr(node, 'source_status', None)
@@ -861,6 +876,26 @@ def _node_row_for_admin(node: Any) -> dict[str, Any]:
     health_status = str(getattr(raw_health, 'value', raw_health) or NodeHealthStatus.unknown.value)
     source_status = str(getattr(raw_source, 'value', raw_source) or NodeSourceStatus.unknown.value)
     sync_state = str(getattr(raw_sync, 'value', raw_sync) or NodeSyncState.never_synced.value)
+
+    last_latency_ms = getattr(node, 'last_latency_ms', None)
+    last_users_online = getattr(node, 'last_users_online', None)
+    last_users_total = getattr(node, 'last_users_total', None)
+    last_probe_at = getattr(node, 'last_probe_at', None)
+    consecutive_fail_count = int(getattr(node, 'consecutive_fail_count', 0) or 0)
+    has_probed = last_probe_at is not None
+
+    if last_latency_ms is None:
+        latency_label = '—'
+    else:
+        latency_label = f'{int(last_latency_ms)} мс'
+
+    if last_users_online is None and last_users_total is None:
+        users_label = '—'
+    else:
+        online_part = str(int(last_users_online)) if last_users_online is not None else '?'
+        total_part = str(int(last_users_total)) if last_users_total is not None else '?'
+        users_label = f'{online_part} / {total_part}'
+
     return {
         'node': node,
         'health_status': health_status,
@@ -873,6 +908,17 @@ def _node_row_for_admin(node: Any) -> dict[str, Any]:
         'last_sync_at_display': format_dt(getattr(node, 'last_sync_at', None)),
         'sync_error': (getattr(node, 'sync_error', None) or '').strip() or None,
         'source_node_id': (getattr(node, 'source_node_id', None) or '').strip() or None,
+        # FEA-ADMIN-NODE-MONITOR: live-probe данные (денорм-поля).
+        'last_latency_ms': last_latency_ms,
+        'last_latency_label': latency_label,
+        'last_latency_tone': _node_latency_tone(last_latency_ms, has_probed=has_probed),
+        'last_users_online': last_users_online,
+        'last_users_total': last_users_total,
+        'last_users_label': users_label,
+        'last_probe_at_display': format_dt(last_probe_at) if has_probed else 'Не проверялась',
+        'consecutive_fail_count': consecutive_fail_count,
+        'is_degraded_probe': consecutive_fail_count >= 1,
+        'is_alerting_probe': consecutive_fail_count >= 5,
     }
 
 
