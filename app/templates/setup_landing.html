@@ -10,83 +10,147 @@
 <body class="min-h-screen bg-slate-950 text-slate-100">
   <main class="flex min-h-screen items-start justify-center px-4 py-10">
     <div class="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-black/30 md:p-10">
+
       <div class="text-center">
         <div class="text-xs uppercase tracking-[0.25em] text-slate-500">SwoiVPN</div>
         <h1 class="mt-3 text-2xl font-bold text-white md:text-3xl">
-          Установить на этом устройстве
+          Подключение VPN
         </h1>
         {% if detected_os %}
-          <p class="mt-3 text-sm text-emerald-300">
-            ✓ Определена платформа: <span class="font-semibold">{{ detected_os }}</span>
+          <p class="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-sm text-emerald-200">
+            <span>✓</span>
+            <span>Ваше устройство: <span class="font-semibold">{{ detected_os }}</span></span>
           </p>
         {% else %}
-          <p class="mt-3 text-sm text-amber-200">
-            ⚠️ Не удалось определить устройство автоматически — выберите вручную ниже.
+          <p class="mt-3 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-sm text-amber-200">
+            <span>⚠️</span>
+            <span>Устройство не распознано — выберите вручную ниже</span>
           </p>
         {% endif %}
       </div>
 
       {% if detected_os and (detected_download_url or detected_guide_url) %}
-      <div class="mt-7 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5">
-        <div class="text-sm font-semibold text-emerald-200">📱 Для вашего {{ detected_os }}:</div>
-        <div class="mt-4 flex flex-col gap-3 sm:flex-row">
-          {% if detected_download_url %}
-          <a
-            href="{{ detected_download_url }}"
-            class="inline-flex flex-1 items-center justify-center rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
-            rel="noopener"
+      <div class="mt-7 space-y-3">
+        {% if detected_download_url %}
+        <a
+          href="{{ detected_download_url }}"
+          class="flex items-center gap-4 rounded-2xl bg-emerald-500 px-5 py-4 text-base font-semibold text-slate-950 transition hover:bg-emerald-400"
+          rel="noopener"
+        >
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-950/20 text-lg">1</span>
+          <span class="flex-1 text-left">
+            <span class="block text-lg">📥 Скачать приложение</span>
+            <span class="block text-sm font-normal opacity-80">Откроется страница для {{ detected_os }}</span>
+          </span>
+          <span class="text-xl">→</span>
+        </a>
+        {% endif %}
+
+        {% if detected_guide_url %}
+        <a
+          href="{{ detected_guide_url }}"
+          class="flex items-center gap-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-4 text-base font-semibold text-emerald-100 transition hover:bg-emerald-500/20"
+          rel="noopener"
+        >
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-lg">2</span>
+          <span class="flex-1 text-left">
+            <span class="block">📖 Открыть инструкцию</span>
+            <span class="block text-sm font-normal opacity-80">Пошаговая настройка для {{ detected_os }}</span>
+          </span>
+          <span class="text-xl">→</span>
+        </a>
+        {% endif %}
+
+        {% if canonical_subscription_url %}
+        <div class="rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-5 py-4">
+          <div class="flex items-start gap-4">
+            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyan-500/20 text-lg font-semibold text-cyan-200">3</span>
+            <div class="flex-1 min-w-0">
+              <div class="text-base font-semibold text-cyan-100">🔗 Ссылка подписки</div>
+              <div class="mt-1 text-xs text-slate-400">Вставьте её в приложение, если оно не открыло ссылку автоматически.</div>
+              <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <code
+                  id="subscription-url-text"
+                  class="flex-1 select-all break-all rounded-xl border border-cyan-500/20 bg-slate-950 px-3 py-2 text-xs text-slate-300"
+                >{{ canonical_subscription_url }}</code>
+                <button
+                  type="button"
+                  id="copy-subscription-url"
+                  data-default-text="📋 Копировать"
+                  data-copied-text="✓ Скопировано"
+                  class="inline-flex shrink-0 items-center justify-center rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+                >
+                  📋 Копировать
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <details class="mt-6 rounded-2xl border border-slate-800 bg-slate-950/50">
+        <summary class="cursor-pointer select-none px-5 py-3 text-sm font-semibold text-slate-300 hover:text-white">
+          Другие устройства
+        </summary>
+        <div class="grid gap-3 px-5 py-4 sm:grid-cols-2">
+          {% for card in fallback_os_cards %}
+            {% if not card.is_detected %}
+            <div class="rounded-xl border border-slate-700 bg-slate-950 p-4">
+              <div class="text-sm font-semibold text-white">{{ card.os_name }}</div>
+              <div class="mt-2 flex flex-wrap gap-2">
+                {% if card.download_url %}
+                <a href="{{ card.download_url }}" class="inline-flex items-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20" rel="noopener">📥 Скачать</a>
+                {% endif %}
+                {% if card.guide_url %}
+                <a href="{{ card.guide_url }}" class="inline-flex items-center rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" rel="noopener">📖 Инструкция</a>
+                {% endif %}
+                {% if not card.download_url and not card.guide_url %}
+                <span class="text-xs text-slate-500">Не настроены</span>
+                {% endif %}
+              </div>
+            </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </details>
+
+      {% else %}
+      {# Detected_os не определён или нет ссылок — показываем grid сразу. #}
+      {% if canonical_subscription_url %}
+      <div class="mt-7 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-5 py-4">
+        <div class="text-sm font-semibold text-cyan-100">🔗 Ссылка подписки</div>
+        <div class="mt-1 text-xs text-slate-400">Скопируйте и вставьте в VPN-приложение после установки.</div>
+        <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <code
+            id="subscription-url-text"
+            class="flex-1 select-all break-all rounded-xl border border-cyan-500/20 bg-slate-950 px-3 py-2 text-xs text-slate-300"
+          >{{ canonical_subscription_url }}</code>
+          <button
+            type="button"
+            id="copy-subscription-url"
+            data-default-text="📋 Копировать"
+            data-copied-text="✓ Скопировано"
+            class="inline-flex shrink-0 items-center justify-center rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
           >
-            📥 Скачать приложение
-          </a>
-          {% endif %}
-          {% if detected_guide_url %}
-          <a
-            href="{{ detected_guide_url }}"
-            class="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20"
-            rel="noopener"
-          >
-            📖 Инструкция
-          </a>
-          {% endif %}
+            📋 Копировать
+          </button>
         </div>
       </div>
-      {% elif detected_os %}
-      <div class="mt-7 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-200">
-        Определена платформа <span class="font-semibold">{{ detected_os }}</span>, но ссылки на приложение
-        пока не настроены администратором. Воспользуйтесь ссылкой подписки ниже и установите клиент вручную.
-      </div>
       {% endif %}
 
-      {% if canonical_subscription_url %}
-      <div class="mt-6 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
-        <div class="text-xs uppercase tracking-wider text-cyan-200">Ссылка подписки</div>
-        <div class="mt-2 break-all text-xs text-slate-300">{{ canonical_subscription_url }}</div>
-        <p class="mt-2 text-xs text-slate-500">
-          Скопируйте и вставьте в приложение, если оно не открывает ссылку автоматически.
-        </p>
-      </div>
-      {% endif %}
-
-      <div class="mt-7">
-        <div class="text-sm font-semibold text-slate-200">Другие платформы:</div>
+      <div class="mt-6">
+        <div class="text-sm font-semibold text-slate-200">Выберите устройство:</div>
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           {% for card in fallback_os_cards %}
-          <div class="rounded-2xl border {{ 'border-emerald-500/30 bg-emerald-500/5' if card.is_detected else 'border-slate-700 bg-slate-950' }} p-4">
-            <div class="text-sm font-semibold text-white">{{ card.os_name }}{% if card.is_detected %} <span class="text-xs text-emerald-300">(ваше)</span>{% endif %}</div>
+          <div class="rounded-2xl border border-slate-700 bg-slate-950 p-4">
+            <div class="text-sm font-semibold text-white">{{ card.os_name }}</div>
             <div class="mt-2 flex flex-wrap gap-2">
               {% if card.download_url %}
-              <a
-                href="{{ card.download_url }}"
-                class="inline-flex items-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20"
-                rel="noopener"
-              >📥 Скачать</a>
+              <a href="{{ card.download_url }}" class="inline-flex items-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20" rel="noopener">📥 Скачать</a>
               {% endif %}
               {% if card.guide_url %}
-              <a
-                href="{{ card.guide_url }}"
-                class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
-                rel="noopener"
-              >📖 Инструкция</a>
+              <a href="{{ card.guide_url }}" class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-cyan-500 hover:text-white" rel="noopener">📖 Инструкция</a>
               {% endif %}
               {% if not card.download_url and not card.guide_url %}
               <span class="text-xs text-slate-500">Не настроены</span>
@@ -96,19 +160,68 @@
           {% endfor %}
         </div>
       </div>
+      {% endif %}
 
       {% if bot_username %}
-      <div class="mt-8 text-center">
-        <a
-          href="https://t.me/{{ bot_username }}"
-          class="inline-flex items-center rounded-2xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-cyan-500 hover:text-white"
-          rel="noopener"
-        >
-          ← Вернуться в Telegram-бот
+      <div class="mt-8 rounded-2xl border border-slate-800 bg-slate-950 p-4 text-center text-sm text-slate-400">
+        Не получилось подключиться?
+        <a href="https://t.me/{{ bot_username }}" class="font-semibold text-cyan-300 hover:text-cyan-200" rel="noopener">
+          Напишите в бот @{{ bot_username }}
         </a>
       </div>
       {% endif %}
     </div>
   </main>
+
+  <script>
+    (function () {
+      var btn = document.getElementById('copy-subscription-url');
+      var src = document.getElementById('subscription-url-text');
+      if (!btn || !src) {
+        return;
+      }
+      var defaultText = btn.getAttribute('data-default-text') || 'Копировать';
+      var copiedText = btn.getAttribute('data-copied-text') || 'Скопировано';
+
+      function flash() {
+        btn.textContent = copiedText;
+        btn.classList.add('bg-emerald-500/20', 'border-emerald-500/40', 'text-emerald-200');
+        setTimeout(function () {
+          btn.textContent = defaultText;
+          btn.classList.remove('bg-emerald-500/20', 'border-emerald-500/40', 'text-emerald-200');
+        }, 1800);
+      }
+
+      btn.addEventListener('click', function () {
+        var value = (src.textContent || '').trim();
+        if (!value) {
+          return;
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value).then(flash, function () {
+            fallbackCopy(value);
+          });
+        } else {
+          fallbackCopy(value);
+        }
+      });
+
+      function fallbackCopy(value) {
+        var area = document.createElement('textarea');
+        area.value = value;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        try {
+          document.execCommand('copy');
+          flash();
+        } catch (e) {
+          // best-effort; if execCommand throws, leave UI as-is
+        }
+        document.body.removeChild(area);
+      }
+    })();
+  </script>
 </body>
 </html>
