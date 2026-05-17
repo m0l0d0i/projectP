@@ -7,9 +7,23 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from apscheduler.events import (
+    EVENT_JOB_ERROR,
+    EVENT_JOB_EXECUTED,
+    EVENT_JOB_MISSED,
+    EVENT_JOB_SUBMITTED,
+    EVENT_SCHEDULER_SHUTDOWN,
+    EVENT_SCHEDULER_STARTED,
+)
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import Settings
+from app.observability.metrics import (
+    SCHEDULER_JOB_ERRORS,
+    SCHEDULER_JOB_LAG_SECONDS,
+    SCHEDULER_JOB_MISFIRES,
+    SCHEDULER_RUNNING,
+)
 from app.services.broadcast_polling import process_scheduled_broadcasts
 from app.services.marzban import MarzbanClient
 from app.services.notification_dispatcher import NotificationDispatcher
@@ -36,6 +50,39 @@ except Exception:  # pragma: no cover - optional dependency for tests/local env
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _attach_metrics_listeners(scheduler: AsyncIOScheduler) -> None:
+    def _on_submitted(event) -> None:
+        scheduled_runs = getattr(event, 'scheduled_run_times', None) or []
+        if not scheduled_runs:
+            return
+        scheduled = min(scheduled_runs)
+        if scheduled.tzinfo is None:
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        lag = max(0.0, (_utcnow() - scheduled).total_seconds())
+        SCHEDULER_JOB_LAG_SECONDS.labels(job_id=event.job_id).observe(lag)
+        if lag >= 30.0:
+            logger.warning('Scheduler job lag exceeded 30s: job_id=%s lag=%.2fs', event.job_id, lag)
+
+    def _on_missed(event) -> None:
+        SCHEDULER_JOB_MISFIRES.labels(job_id=event.job_id).inc()
+        logger.warning('Scheduler job missed (misfire_grace_time exceeded): job_id=%s scheduled=%s', event.job_id, event.scheduled_run_time)
+
+    def _on_error(event) -> None:
+        SCHEDULER_JOB_ERRORS.labels(job_id=event.job_id).inc()
+
+    def _on_started(_event) -> None:
+        SCHEDULER_RUNNING.set(1)
+
+    def _on_shutdown(_event) -> None:
+        SCHEDULER_RUNNING.set(0)
+
+    scheduler.add_listener(_on_submitted, EVENT_JOB_SUBMITTED)
+    scheduler.add_listener(_on_missed, EVENT_JOB_MISSED)
+    scheduler.add_listener(_on_error, EVENT_JOB_ERROR)
+    scheduler.add_listener(_on_started, EVENT_SCHEDULER_STARTED)
+    scheduler.add_listener(_on_shutdown, EVENT_SCHEDULER_SHUTDOWN)
 
 
 class SchedulerLeader:
@@ -343,6 +390,8 @@ def build_scheduler(
         max_instances=1,
         misfire_grace_time=30,
     )
+
+    _attach_metrics_listeners(scheduler)
 
     logger.info(
         'Scheduler configured: jobs=%s',

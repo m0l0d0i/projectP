@@ -58,6 +58,30 @@ NODE_HEALTH = Gauge(
     ['node'],
 )
 
+# OPS-7: scheduler-lag SLO. APScheduler даёт scheduled_run_time job'а;
+# фактическое время — момент EVENT_JOB_SUBMITTED. Гистограмма задержек
+# (per job_id) позволяет в Grafana увидеть P99 и упустившие SLA задачи.
+SCHEDULER_JOB_LAG_SECONDS = Histogram(
+    'vpn_bot_scheduler_job_lag_seconds',
+    'Задержка между запланированным и фактическим запуском scheduler-job (секунды)',
+    ['job_id'],
+    buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0),
+)
+SCHEDULER_JOB_MISFIRES = Counter(
+    'vpn_bot_scheduler_job_misfires_total',
+    'Job не запустился в свой scheduled_run_time (misfire_grace_time превышен)',
+    ['job_id'],
+)
+SCHEDULER_JOB_ERRORS = Counter(
+    'vpn_bot_scheduler_job_errors_total',
+    'Job завершился с исключением',
+    ['job_id'],
+)
+SCHEDULER_RUNNING = Gauge(
+    'vpn_bot_scheduler_running',
+    'Scheduler запущен в этом процессе (1 = да, 0 = нет/лидерство потеряно)',
+)
+
 
 def notification_counters_snapshot() -> dict[str, dict[str, float]]:
     """Снимок in-process Prometheus-counter'ов NotificationDispatcher.
