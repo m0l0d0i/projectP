@@ -85,7 +85,11 @@
         <div>
           <div class="mb-2 px-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Обзор</div>
 
-          <a href="/admin/system/" class="block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'system' or current_page == 'search' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
+          <a href="/admin/dashboard/" class="block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'dashboard' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
+            Аналитика
+          </a>
+
+          <a href="/admin/system/" class="mt-2 block rounded-2xl px-4 py-3 text-sm font-medium transition {% if current_page == 'system' or current_page == 'search' %}bg-cyan-500/15 text-cyan-300{% else %}text-slate-300 hover:bg-slate-800{% endif %}">
             Система
           </a>
 

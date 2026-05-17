@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Аналитика{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / Аналитика</div>
+      <h1 class="text-3xl font-bold text-white">Аналитика</h1>
+      <p class="mt-2 max-w-4xl text-slate-400">
+        Сводка ключевых метрик: активные подписки, выручка по периодам, рост базы пользователей.
+        Числа — агрегаты из БД на момент открытия страницы.
+      </p>
+    </div>
+    <div class="text-sm text-slate-400">
+      Обновлено: <span class="text-slate-200">{{ generated_at }}</span>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    {% for card in cards %}
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+      <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ card.title }}</div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ card.value }}</div>
+      {% if card.hint %}
+      <div class="mt-2 text-xs text-slate-500">{{ card.hint }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -471,6 +471,12 @@ class UserRepository:
         res = await self.session.execute(select(func.count(User.id)))
         return int(res.scalar_one())
 
+    async def count_created_since(self, since: datetime) -> int:
+        res = await self.session.execute(
+            select(func.count(User.id)).where(User.created_at >= since)
+        )
+        return int(res.scalar_one())
+
     async def count_broadcast_recipients(self) -> int:
         res = await self.session.execute(
             select(func.count(User.id)).where(
@@ -1806,6 +1812,18 @@ class SubscriptionRepository:
         await self.session.flush()
         return subscription
 
+    async def count_alive(self, *, trial: bool | None = None) -> int:
+        now = datetime.now(timezone.utc)
+        stmt = select(func.count(Subscription.id)).where(
+            or_(Subscription.expire_date.is_(None), Subscription.expire_date > now),
+        )
+        if trial is True:
+            stmt = stmt.where(Subscription.is_trial.is_(True))
+        elif trial is False:
+            stmt = stmt.where(Subscription.is_trial.is_(False))
+        res = await self.session.execute(stmt)
+        return int(res.scalar_one())
+
 
 class InvoiceRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -1894,6 +1912,22 @@ class InvoiceRepository:
     async def count(self) -> int:
         res = await self.session.execute(select(func.count(Invoice.id)))
         return int(res.scalar_one())
+
+    async def sum_paid_since(
+        self,
+        since: datetime,
+        *,
+        purpose: InvoicePurpose | None = None,
+    ) -> Decimal:
+        stmt = select(func.coalesce(func.sum(Invoice.amount), 0)).where(
+            Invoice.status.in_((InvoiceStatus.paid, InvoiceStatus.consumed, InvoiceStatus.applying)),
+            Invoice.paid_at.is_not(None),
+            Invoice.paid_at >= since,
+        )
+        if purpose is not None:
+            stmt = stmt.where(Invoice.purpose == purpose)
+        res = await self.session.execute(stmt)
+        return Decimal(str(res.scalar_one() or 0))
 
     async def get_by_external_invoice_id_for_update(self, provider: str, external_invoice_id: str) -> Invoice | None:
         res = await self.session.execute(

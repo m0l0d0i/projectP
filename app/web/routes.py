@@ -35,6 +35,7 @@ from app.db.models import (
     AuditLog,
     BroadcastJobStatus,
     Invoice,
+    InvoicePurpose,
     InvoiceStatus,
     LLMProviderKind,
     NodeHealthStatus,
@@ -2434,6 +2435,65 @@ async def _delete_tariff_via_repo(repo: TariffRepository, plan) -> bool:
 @router.get('/admin', include_in_schema=False)
 async def admin_index_redirect_noslash() -> RedirectResponse:
     return RedirectResponse(url='/admin/system/', status_code=307)
+
+
+# FEA-ADMIN-DASHBOARD: read-only аналитика для всех ролей (RBAC=any).
+# Только агрегаты — без PII (juicy invoice_id'ы, имена и т.п. остаются в
+# /admin/users/, /admin/invoices/, /admin/subscriptions/).
+@router.get('/admin/dashboard/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
+async def admin_dashboard(request: Request):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+
+    async with sessionmaker() as session:
+        user_repo = UserRepository(session)
+        sub_repo = SubscriptionRepository(session)
+        invoice_repo = InvoiceRepository(session)
+        ticket_repo = SupportTicketRepository(session)
+
+        active_subs = await sub_repo.count_alive(trial=False)
+        active_trials = await sub_repo.count_alive(trial=True)
+        new_users_7d = await user_repo.count_created_since(week_ago)
+        new_users_30d = await user_repo.count_created_since(month_ago)
+        revenue_today = await invoice_repo.sum_paid_since(today_start)
+        revenue_7d = await invoice_repo.sum_paid_since(week_ago)
+        revenue_30d = await invoice_repo.sum_paid_since(month_ago)
+        mrr_30d = await invoice_repo.sum_paid_since(month_ago, purpose=InvoicePurpose.tariff)
+        open_tickets = (
+            await ticket_repo.count_for_admin(status=SupportTicketStatus.waiting_operator)
+            + await ticket_repo.count_for_admin(status=SupportTicketStatus.waiting_user)
+        )
+
+    scheduler = getattr(request.app.state, 'scheduler', None)
+    scheduler_running = bool(getattr(scheduler, 'running', False)) if scheduler is not None else False
+
+    cards = [
+        {'title': 'Активные подписки', 'value': active_subs, 'hint': 'без trial, expire_date в будущем'},
+        {'title': 'Активные trial', 'value': active_trials, 'hint': 'trial-подписки, ещё живые'},
+        {'title': 'MRR (30 дней)', 'value': f'{mrr_30d:.0f} ₽', 'hint': 'оплаченные tariff-инвойсы за 30 дней'},
+        {'title': 'Выручка сегодня', 'value': f'{revenue_today:.0f} ₽', 'hint': 'все purpose, paid+consumed+applying'},
+        {'title': 'Выручка за 7 дней', 'value': f'{revenue_7d:.0f} ₽', 'hint': 'все purpose'},
+        {'title': 'Выручка за 30 дней', 'value': f'{revenue_30d:.0f} ₽', 'hint': 'все purpose'},
+        {'title': 'Новые юзеры (7д)', 'value': new_users_7d, 'hint': f'за 30д: {new_users_30d}'},
+        {'title': 'Открытые тикеты', 'value': open_tickets, 'hint': 'waiting_user + waiting_operator'},
+        {'title': 'Scheduler', 'value': 'OK' if scheduler_running else '⚠️ не запущен', 'hint': 'жив только на leader-инстансе'},
+    ]
+
+    return templates.TemplateResponse(
+        request,
+        'admin_dashboard.html',
+        {
+            'current_page': 'dashboard',
+            'cards': cards,
+            'generated_at': format_dt(now),
+        },
+    )
+
 
 @router.get('/admin/system/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_system(request: Request):
