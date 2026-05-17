@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: vpn_bot 1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-17 00:00+0000\n"
+"POT-Creation-Date: 2026-05-17 22:40+0500\n"
 "PO-Revision-Date: 2026-05-17 00:00+0000\n"
 "Last-Translator: \n"
 "Language: en\n"
@@ -14,4 +14,736 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.16.0\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: app/handlers/profile.py:38
+msgid "Да"
+msgstr ""
+
+#: app/handlers/profile.py:38
+msgid "Нет"
+msgstr ""
+
+#: app/handlers/profile.py:54
+msgid "👤 <b>Мой профиль</b>"
+msgstr ""
+
+#: app/handlers/profile.py:55
+#, python-brace-format
+msgid "🆔 <b>ID аккаунта:</b> <code>{tg_id}</code>"
+msgstr ""
+
+#: app/handlers/profile.py:56 app/handlers/purchase.py:337
+#: app/handlers/purchase.py:352
+#, python-brace-format
+msgid "💰 <b>Баланс:</b> {value} ₽"
+msgstr ""
+
+#: app/handlers/profile.py:57
+msgid "🌐 <b>Ваши услуги</b>"
+msgstr ""
+
+#: app/handlers/profile.py:58
+#, python-brace-format
+msgid "• Всего: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/profile.py:59
+#, python-brace-format
+msgid "• Активных: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/profile.py:60
+#, python-brace-format
+msgid "• Неактивных: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/profile.py:61 app/handlers/profile.py:141
+msgid "🤝 <b>Реферальная программа</b>"
+msgstr ""
+
+#: app/handlers/profile.py:62
+#, python-brace-format
+msgid "• Приглашено: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/profile.py:63
+#, python-brace-format
+msgid "• Реферальный баланс: <b>{value} ₽</b>"
+msgstr ""
+
+#: app/handlers/profile.py:64
+#, python-brace-format
+msgid "• Можно ввести реферальный код: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/profile.py:142
+msgid "🔗 <b>Ваша реферальная ссылка:</b>"
+msgstr ""
+
+#: app/handlers/profile.py:144
+#, python-brace-format
+msgid "🎟️ <b>Ваш реферальный код:</b> <code>{value}</code>"
+msgstr ""
+
+#: app/handlers/profile.py:145
+msgid "📊 <b>Статистика:</b>"
+msgstr ""
+
+#: app/handlers/profile.py:146
+#, python-brace-format
+msgid "👥 Приглашённые: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/profile.py:147 app/handlers/profile.py:207
+#, python-brace-format
+msgid "💸 Реферальный баланс: <b>{value} ₽</b>"
+msgstr ""
+
+#: app/handlers/profile.py:148
+msgid "Ссылку и код удобно копировать прямо из блока выше."
+msgstr ""
+
+#: app/handlers/profile.py:149
+msgid ""
+"Нажмите «Мои рефералы», чтобы посмотреть список приглашённых и статус "
+"активации."
+msgstr ""
+
+#: app/handlers/profile.py:173
+#, python-brace-format
+msgid "✅ активирован · {value}"
+msgstr ""
+
+#: app/handlers/profile.py:175
+msgid "⏳ ждёт первой оплаты"
+msgstr ""
+
+#: app/handlers/profile.py:177
+msgid "по ссылке"
+msgstr ""
+
+#: app/handlers/profile.py:177
+msgid "промокод"
+msgstr ""
+
+#: app/handlers/profile.py:194
+msgid ""
+"У вас пока нет приглашённых. Поделитесь ссылкой или кодом из экрана "
+"реферальной программы."
+msgstr ""
+
+#: app/handlers/profile.py:199
+#, python-brace-format
+msgid "<i>Показаны последние {shown} из {total}. Старые приглашения скрыты.</i>"
+msgstr ""
+
+#: app/handlers/profile.py:204
+msgid "👥 <b>Мои рефералы</b>"
+msgstr ""
+
+#: app/handlers/profile.py:205
+#, python-brace-format
+msgid "📊 Всего приглашено: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/profile.py:206
+#, python-brace-format
+msgid "✅ Активировано: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/profile.py:227
+msgid "🎁 Введите промокод сообщением:"
+msgstr ""
+
+#: app/handlers/profile.py:250
+msgid "Промокод реферала уже нельзя использовать."
+msgstr ""
+
+#: app/handlers/profile.py:255
+msgid "🎟️ Введите промокод реферала сообщением:"
+msgstr ""
+
+#: app/handlers/purchase.py:289 app/handlers/purchase.py:379
+msgid "💳 <b>Пополнение баланса</b>"
+msgstr ""
+
+#: app/handlers/purchase.py:290
+msgid "Введите сумму сообщением или измените её кнопками ниже."
+msgstr ""
+
+#: app/handlers/purchase.py:291
+#, python-brace-format
+msgid "💰 <b>Сумма:</b> {amount} ₽"
+msgstr ""
+
+#: app/handlers/purchase.py:292
+#, python-brace-format
+msgid "Минимальная сумма пополнения — {value} ₽."
+msgstr ""
+
+#: app/handlers/purchase.py:303
+#, python-brace-format
+msgid "🔢 <b>Услуга:</b> {value}"
+msgstr ""
+
+#: app/handlers/purchase.py:305
+#, python-brace-format
+msgid "➕ <b>Будет начислено:</b> {value} ГБ"
+msgstr ""
+
+#: app/handlers/purchase.py:307 app/handlers/purchase.py:365
+#, python-brace-format
+msgid "📅 <b>Действует до конца текущего цикла:</b> {value}"
+msgstr ""
+
+#: app/handlers/purchase.py:309 app/handlers/purchase.py:367
+msgid "📅 <b>Действует:</b> только до конца текущего расчетного периода"
+msgstr ""
+
+#: app/handlers/purchase.py:311
+msgid ""
+"♻️ <b>Важно:</b> этот трафик не переносится на следующий цикл и будет "
+"обнулён при monthly reset."
+msgstr ""
+
+#: app/handlers/purchase.py:327
+msgid "♾️ Безлимит трафика каждый месяц"
+msgstr ""
+
+#: app/handlers/purchase.py:327
+#, python-brace-format
+msgid "🌐 {gb} ГБ каждый месяц"
+msgstr ""
+
+#: app/handlers/purchase.py:329
+msgid "🧺 <b>Корзина продления</b>"
+msgstr ""
+
+#: app/handlers/purchase.py:329
+msgid "🧺 <b>Корзина подписки</b>"
+msgstr ""
+
+#: app/handlers/purchase.py:332
+#, python-brace-format
+msgid "🌐 <b>Тариф:</b> {value}"
+msgstr ""
+
+#: app/handlers/purchase.py:333
+#, python-brace-format
+msgid "📱 <b>Устройства:</b> {value}"
+msgstr ""
+
+#: app/handlers/purchase.py:334
+#, python-brace-format
+msgid "📆 <b>Срок:</b> {months} мес."
+msgstr ""
+
+#: app/handlers/purchase.py:335
+#, python-brace-format
+msgid "🎁 <b>Скидка:</b> {value:.1f}%"
+msgstr ""
+
+#: app/handlers/purchase.py:336 app/handlers/purchase.py:351
+#: app/handlers/purchase.py:374
+#, python-brace-format
+msgid "💳 <b>Стоимость:</b> {value} ₽"
+msgstr ""
+
+#: app/handlers/purchase.py:338 app/handlers/purchase.py:353
+#, python-brace-format
+msgid "➖ <b>Списать с баланса:</b> {value} ₽"
+msgstr ""
+
+#: app/handlers/purchase.py:339 app/handlers/purchase.py:354
+#: app/handlers/purchase.py:375 app/handlers/purchase.py:381
+#, python-brace-format
+msgid "🧾 <b>К оплате:</b> {value} ₽"
+msgstr ""
+
+#: app/handlers/purchase.py:346
+#, python-brace-format
+msgid ""
+"💡 На балансе есть {balance} ₽ — можно списать их кнопкой «Использовать "
+"баланс»."
+msgstr ""
+
+#: app/handlers/purchase.py:348
+msgid "📦 <b>Докупка трафика</b>"
+msgstr ""
+
+#: app/handlers/purchase.py:349
+#, python-brace-format
+msgid "🌐 <b>Пакет:</b> {value}"
+msgstr ""
+
+#: app/handlers/purchase.py:363
+msgid "фиксированная цена"
+msgstr ""
+
+#: app/handlers/purchase.py:363
+msgid "пропорционально оставшимся дням"
+msgstr ""
+
+#: app/handlers/purchase.py:370
+msgid "➕ <b>Добавление устройства</b>"
+msgstr ""
+
+#: app/handlers/purchase.py:371
+#, python-brace-format
+msgid "📱 <b>Лимит устройств:</b> {prev} → {new}"
+msgstr ""
+
+#: app/handlers/purchase.py:373
+#, python-brace-format
+msgid "💸 <b>Расчёт:</b> {value}"
+msgstr ""
+
+#: app/handlers/purchase.py:380
+#, python-brace-format
+msgid "💰 <b>Сумма пополнения:</b> {value} ₽"
+msgstr ""
+
+#: app/handlers/purchase.py:459
+msgid "Выберите действие ниже."
+msgstr ""
+
+#: app/handlers/purchase.py:474
+msgid "Введите сумму цифрами, например: 300"
+msgstr ""
+
+#: app/handlers/purchase.py:478 app/handlers/purchase.py:520
+#: app/handlers/purchase.py:534 app/handlers/purchase.py:542
+#, python-brace-format
+msgid "Минимальная сумма пополнения — {value} ₽"
+msgstr ""
+
+#: app/handlers/purchase.py:512
+msgid "👌 Пополнение отменено."
+msgstr ""
+
+#: app/handlers/purchase.py:522
+msgid "Сумма уже выбрана"
+msgstr ""
+
+#: app/handlers/purchase.py:534
+msgid "Сумма обновлена"
+msgstr ""
+
+#: app/handlers/purchase.py:574
+msgid "Счет создан"
+msgstr ""
+
+#: app/handlers/start.py:69
+#, python-brace-format
+msgid "🔓 Тариф «{title}» разблокирован для вашего аккаунта."
+msgstr ""
+
+#: app/handlers/start.py:71
+msgid "Откройте «Купить VPN», чтобы оформить подписку по нему."
+msgstr ""
+
+#: app/handlers/start.py:102
+msgid ""
+"🎉 Приглашение принято. Реферальный бонус будет начислен после вашей "
+"первой оплаты."
+msgstr ""
+
+#: app/handlers/start.py:115
+msgid ""
+"Привет! 👋\n"
+"\n"
+"Выберите действие в меню ниже."
+msgstr ""
+
+#: app/handlers/support.py:653 app/handlers/support.py:734
+msgid "📬 <b>Ваши обращения в поддержку:</b>"
+msgstr ""
+
+#: app/handlers/support.py:673
+msgid ""
+"📩 Введите ваше обращение. Можно отправить текст, фото, видео, документ "
+"или голосовое сообщение."
+msgstr ""
+
+#: app/handlers/vpn.py:53
+msgid "📱 💻 Выберите свое устройство из предложенного списка:"
+msgstr ""
+
+#: app/handlers/vpn.py:54
+msgid "🌐 Подключение к VPN VLESS:"
+msgstr ""
+
+#: app/handlers/vpn.py:56
+msgid ""
+"К сожалению, инструкции/ссылки на приложение для этого устройства ещё нет"
+" 😔 Если хотите помочь записать процесс установки/посоветовать приложение,"
+" пожалуйста, обратитесь в поддержку 📩🙏."
+msgstr ""
+
+#: app/handlers/vpn.py:136
+msgid "🌐 Страница вашей подписки"
+msgstr ""
+
+#: app/handlers/vpn.py:167 app/handlers/vpn.py:548
+msgid "Продление подписки"
+msgstr ""
+
+#: app/handlers/vpn.py:167
+msgid "Оформление новой подписки"
+msgstr ""
+
+#: app/handlers/vpn.py:170
+msgid "Выберите режим устройств:"
+msgstr ""
+
+#: app/handlers/vpn.py:309
+msgid "♻️ <b>Сброс трафика</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:310
+#, python-brace-format
+msgid "Услуга: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:311
+#, python-brace-format
+msgid "Стоимость сброса: <b>{value} ₽</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:312
+#, python-brace-format
+msgid "Цена тарифа за цикл: <b>{value} ₽</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:313
+#, python-brace-format
+msgid "До конца текущего цикла: <b>{days_left} {word}</b> из <b>{days_total}</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:316
+#, python-brace-format
+msgid "Ваш баланс: <b>{value} ₽</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:317
+msgid ""
+"После подтверждения трафик будет сброшен, а сумма сразу спишется с "
+"баланса."
+msgstr ""
+
+#: app/handlers/vpn.py:406 app/handlers/vpn.py:662
+msgid ""
+"🌐 <b>Подключение VPN</b>\n"
+"\n"
+"Выберите режим устройств:"
+msgstr ""
+
+#: app/handlers/vpn.py:413 app/handlers/vpn.py:657
+msgid ""
+"👑 <b>Мой VPN</b>\n"
+"\n"
+"Выберите услугу:"
+msgstr ""
+
+#: app/handlers/vpn.py:432
+msgid ""
+"🎁 <b>Тестовая подписка</b>\n"
+"Продление, сброс трафика и докупка трафика недоступны."
+msgstr ""
+
+#: app/handlers/vpn.py:435
+msgid ""
+"♾️ <b>Безлимитный тариф</b>\n"
+"Докупка трафика для этого тарифа не требуется и недоступна."
+msgstr ""
+
+#: app/handlers/vpn.py:443
+#, python-brace-format
+msgid "Базовый трафик цикла: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:444
+#, python-brace-format
+msgid "Использованный трафик: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:447
+#, python-brace-format
+msgid "Доп. трафик текущего цикла: +{value}"
+msgstr ""
+
+#: app/handlers/vpn.py:448
+#, python-brace-format
+msgid "Доступно в текущем цикле: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:450
+#, python-brace-format
+msgid "Предоставленный трафик: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:452
+#, python-brace-format
+msgid "Текущий цикл до: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:456
+msgid "🌐 Информация о вашей услуге:"
+msgstr ""
+
+#: app/handlers/vpn.py:457
+#, python-brace-format
+msgid "Статус: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:458
+#, python-brace-format
+msgid "Дата окончания: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:459 app/handlers/vpn.py:855
+#, python-brace-format
+msgid "Номер услуги: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:548
+msgid "Оформление подписки"
+msgstr ""
+
+#: app/handlers/vpn.py:552
+#, python-brace-format
+msgid "Тариф: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:553
+#, python-brace-format
+msgid "Устройства: <b>{value}</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:554
+#, python-brace-format
+msgid "Срок: <b>{months} мес.</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:555
+#, python-brace-format
+msgid "Месячная цена: <b>{value} ₽</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:556
+#, python-brace-format
+msgid "Сумма без скидки: <b>{value} ₽</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:557
+#, python-brace-format
+msgid "Скидка: <b>{value}%</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:558
+#, python-brace-format
+msgid "К оплате: <b>{value} ₽</b>"
+msgstr ""
+
+#: app/handlers/vpn.py:574
+msgid "Тест уже был использован ранее."
+msgstr ""
+
+#: app/handlers/vpn.py:582
+#, python-brace-format
+msgid "{gb} ГБ"
+msgstr ""
+
+#: app/handlers/vpn.py:586
+#, python-brace-format
+msgid ""
+"🎁 <b>Бесплатный тест</b>\n"
+"\n"
+"Вы получите доступ на {duration}, {traffic} трафика и {devices}.\n"
+"Хотите активировать?"
+msgstr ""
+
+#: app/handlers/vpn.py:608
+msgid "👌 Хорошо, тест можно взять позже."
+msgstr ""
+
+#: app/handlers/vpn.py:626
+msgid "❌ Не удалось активировать тест из-за ошибки панели. Попробуйте позже."
+msgstr ""
+
+#: app/handlers/vpn.py:634
+msgid "✅ Тестовая подписка активирована."
+msgstr ""
+
+#: app/handlers/vpn.py:638
+msgid "🏠 Главное меню обновлено."
+msgstr ""
+
+#: app/handlers/vpn.py:688
+msgid "Открываю оформление подписки"
+msgstr ""
+
+#: app/handlers/vpn.py:688
+msgid "Это меню уже открыто"
+msgstr ""
+
+#: app/handlers/vpn.py:701 app/handlers/vpn.py:765 app/handlers/vpn.py:783
+#: app/handlers/vpn.py:838 app/handlers/vpn.py:924 app/handlers/vpn.py:963
+#: app/handlers/vpn.py:1002
+msgid "Подписка не найдена"
+msgstr ""
+
+#: app/handlers/vpn.py:705
+msgid "Тестовую подписку нельзя продлить"
+msgstr ""
+
+#: app/handlers/vpn.py:738
+msgid "Выберите срок продления"
+msgstr ""
+
+#: app/handlers/vpn.py:743
+msgid ""
+"🌐 <b>Продление подписки</b>\n"
+"\n"
+"Выберите режим устройств:"
+msgstr ""
+
+#: app/handlers/vpn.py:844
+msgid "Ссылка подписки отсутствует"
+msgstr ""
+
+#: app/handlers/vpn.py:851
+msgid "🌐 Информация о вашей услуге следующая:"
+msgstr ""
+
+#: app/handlers/vpn.py:852
+#, python-brace-format
+msgid "🔎 Статус услуги: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:853
+#, python-brace-format
+msgid "Максимальное количество подключений: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:854
+msgid "Протокол: VLESS"
+msgstr ""
+
+#: app/handlers/vpn.py:856
+#, python-brace-format
+msgid "♾️ Предоставленный трафик: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:857
+#, python-brace-format
+msgid "📅 Активен до: {value}"
+msgstr ""
+
+#: app/handlers/vpn.py:861
+msgid "🎁 Тестовая подписка: продление, сброс трафика и докупка недоступны."
+msgstr ""
+
+#: app/handlers/vpn.py:863
+msgid "♾️ Безлимитный тариф: докупка трафика недоступна."
+msgstr ""
+
+#: app/handlers/vpn.py:865
+#, python-brace-format
+msgid "➕ Доп. трафик текущего цикла: +{value}"
+msgstr ""
+
+#: app/handlers/vpn.py:880
+msgid "🌐 Откройте страницу вашей подписки по кнопке ниже:"
+msgstr ""
+
+#: app/handlers/vpn.py:928
+msgid "Для тестовой подписки докупка трафика недоступна"
+msgstr ""
+
+#: app/handlers/vpn.py:932
+msgid "Для безлимитного тарифа докупка трафика не требуется и недоступна"
+msgstr ""
+
+#: app/handlers/vpn.py:939
+msgid "Сейчас нет доступных пакетов докупки трафика. Попробуйте позже."
+msgstr ""
+
+#: app/handlers/vpn.py:945
+msgid "Выберите объем доп. трафика:"
+msgstr ""
+
+#: app/handlers/vpn.py:967 app/handlers/vpn.py:1005
+msgid "Для тестовой подписки сброс трафика недоступен"
+msgstr ""
+
+#: app/handlers/vpn.py:982
+msgid "Проверьте стоимость и подтвердите сброс"
+msgstr ""
+
+#: app/handlers/vpn.py:999
+msgid "Пользователь не найден"
+msgstr ""
+
+#: app/handlers/vpn.py:1018
+msgid "Не удалось выполнить сброс через панель. Попробуйте позже."
+msgstr ""
+
+#: app/handlers/vpn.py:1022
+#, python-brace-format
+msgid "Трафик сброшен. Списано {value} ₽"
+msgstr ""
+
+#: app/handlers/vpn.py:1034
+msgid "Возвращаю к Мой VPN"
+msgstr ""
+
+#: app/handlers/vpn.py:1051
+msgid "Не удалось понять, какое уведомление отключить."
+msgstr ""
+
+#: app/handlers/vpn.py:1056
+msgid "Snooze временно недоступен. Попробуйте позже."
+msgstr ""
+
+#: app/handlers/vpn.py:1068
+msgid "Не удалось включить snooze. Попробуйте позже."
+msgstr ""
+
+#: app/handlers/vpn.py:1071
+msgid "🔕 Не буду напоминать 24 часа."
+msgstr ""
+
+#: app/keyboards/reply.py:9
+msgid "🎁 Тест на 24 часа"
+msgstr ""
+
+#: app/keyboards/reply.py:10
+msgid "⚙️ Админка"
+msgstr ""
+
+#: app/keyboards/reply.py:13
+msgid "👑 Мой VPN"
+msgstr ""
+
+#: app/keyboards/reply.py:13
+msgid "👤 Мой профиль"
+msgstr ""
+
+#: app/keyboards/reply.py:14
+msgid "💳 Пополнить"
+msgstr ""
+
+#: app/keyboards/reply.py:14
+msgid "📞 Поддержка"
+msgstr ""
+
+#: app/keyboards/reply.py:15
+msgid "📜 Правила сервиса"
+msgstr ""
+
+#: app/keyboards/reply.py:47
+msgid "Выберите действие"
+msgstr ""
+
