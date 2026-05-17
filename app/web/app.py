@@ -5,6 +5,7 @@ import hmac
 import ipaddress
 import logging
 import secrets
+import uuid
 from contextlib import suppress
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -16,8 +17,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
+from app.observability.logging import request_id_var
 from app.utils.formatters import bytes_to_gb, format_dt
 from app.web.routes import router as web_admin_router
+
+_REQUEST_ID_HEADER = 'X-Request-ID'
+_REQUEST_ID_MAX_LEN = 128
 
 
 logger = logging.getLogger(__name__)
@@ -239,6 +244,26 @@ def create_fastapi_app(*, sessionmaker, settings) -> FastAPI:
                 )
             if request.method in {'GET', 'HEAD'}:
                 _ensure_admin_csrf_cookie(request, response)
+        return response
+
+    # OPS-6: добавляем последним, чтобы он стал outermost-обёрткой
+    # (Starlette.add_middleware вставляет в начало списка, последним
+    # зарегистрированный = обрабатывает запрос первым). Так request_id
+    # установлен ДО входа в ip_restriction_middleware — отказы попадут
+    # в лог с request_id.
+    @app.middleware('http')
+    async def request_id_middleware(request: Request, call_next):
+        incoming = (request.headers.get(_REQUEST_ID_HEADER) or '').strip()
+        if incoming and len(incoming) <= _REQUEST_ID_MAX_LEN and incoming.isprintable():
+            request_id = incoming
+        else:
+            request_id = f'req-{uuid.uuid4().hex[:16]}'
+        token = request_id_var.set(request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            request_id_var.reset(token)
+        response.headers[_REQUEST_ID_HEADER] = request_id
         return response
 
     app.state.bot = None

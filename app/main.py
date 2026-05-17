@@ -28,6 +28,7 @@ from app.db.session import create_engine_and_sessionmaker
 from app.handlers import admin_panel, errors, fallback, profile, purchase, rules, start, support, vpn
 from app.middlewares.anti_spam import AntiSpamMiddleware
 from app.middlewares.blocked import BlockedUserMiddleware
+from app.middlewares.correlation import CorrelationIdMiddleware
 from app.middlewares.db import DbSessionMiddleware
 from app.middlewares.i18n import I18nMiddleware
 from app.middlewares.services import ServicesMiddleware
@@ -364,6 +365,10 @@ def _build_dispatcher(settings, marzban, payments, sessionmaker, cache: CacheSer
         sessionmaker=sessionmaker,
     )
     i18n_middleware = I18nMiddleware()
+    correlation_middleware = CorrelationIdMiddleware()
+
+    dp.message.outer_middleware(correlation_middleware)
+    dp.callback_query.outer_middleware(correlation_middleware)
 
     dp.message.middleware(db_middleware)
     dp.callback_query.middleware(db_middleware)
