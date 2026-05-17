@@ -15,6 +15,7 @@ from app.config import Settings
 from app.db.models import Invoice, InvoicePurpose
 from app.db.repositories import AppSettingsRepository, SubscriptionRepository
 from app.handlers.common import get_or_create_user
+from app.i18n import all_translations
 from app.keyboards.inline import (
     BalanceAmountCallback,
     DeviceCountCallback,
@@ -46,7 +47,33 @@ from app.utils.runtime_settings import coerce_int_set, effective_list_from_row
 router = Router(name='purchase')
 logger = logging.getLogger(__name__)
 
-MAIN_MENU_BUTTONS = {'🎁 Тест на 24 часа', '👑 Мой VPN', '👤 Мой профиль', '💳 Пополнить', '📞 Поддержка', '📜 Правила сервиса'}
+MAIN_MENU_BUTTON_MSGIDS = (
+    '🎁 Тест на 24 часа',
+    '👑 Мой VPN',
+    '👤 Мой профиль',
+    '💳 Пополнить',
+    '📞 Поддержка',
+    '📜 Правила сервиса',
+)
+
+
+def _all_main_menu_labels() -> set[str]:
+    labels: set[str] = set()
+    for msgid in MAIN_MENU_BUTTON_MSGIDS:
+        labels |= all_translations(msgid)
+    return labels
+
+
+MAIN_MENU_BUTTONS = _all_main_menu_labels()
+
+
+def _match_main_menu_msgid(text: str | None) -> str | None:
+    if not text:
+        return None
+    for msgid in MAIN_MENU_BUTTON_MSGIDS:
+        if text in all_translations(msgid):
+            return msgid
+    return None
 
 
 def _user_friendly_payment_error_message(exc: PaymentProviderError) -> str:
@@ -186,7 +213,14 @@ async def _is_admin_user(session: AsyncSession, tg_id: int, settings: Settings) 
         return tg_id in coerce_int_set(settings.admin_ids)
 
 
-async def _reply_main_menu(target, session: AsyncSession, settings: Settings, text: str) -> None:
+async def _reply_main_menu(
+    target,
+    session: AsyncSession,
+    settings: Settings,
+    text: str,
+    *,
+    _: Callable[[str], str] = lambda s: s,
+) -> None:
     user = await get_or_create_user(target, session)
     is_admin = await _is_admin_user(session, user.tg_id, settings)
     await target.answer(
@@ -194,6 +228,7 @@ async def _reply_main_menu(target, session: AsyncSession, settings: Settings, te
         reply_markup=main_menu(
             show_trial=not bool(user.trial_issued_at),
             show_admin=is_admin,
+            translator=_,
         ),
     )
 
@@ -244,36 +279,44 @@ async def _render_months_text(
     )
 
 
-def render_balance_topup_prompt(amount: int, min_topup_amount: int) -> str:
+def render_balance_topup_prompt(
+    amount: int,
+    min_topup_amount: int,
+    _: Callable[[str], str] = lambda s: s,
+) -> str:
     min_amount_label = _format_amount_label(min_topup_amount)
     return (
-        '💳 <b>Пополнение баланса</b>\n\n'
-        'Введите сумму сообщением или измените её кнопками ниже.\n'
-        f'💰 <b>Сумма:</b> {amount} ₽\n\n'
-        f'Минимальная сумма пополнения — {min_amount_label} ₽.'
+        _('💳 <b>Пополнение баланса</b>') + '\n\n'
+        + _('Введите сумму сообщением или измените её кнопками ниже.') + '\n'
+        + _('💰 <b>Сумма:</b> {amount} ₽').format(amount=amount) + '\n\n'
+        + _('Минимальная сумма пополнения — {value} ₽.').format(value=min_amount_label)
     )
 
 
-def _render_topup_cycle_scope(payload: dict) -> str:
+def _render_topup_cycle_scope(payload: dict, _: Callable[[str], str] = lambda s: s) -> str:
     extra_traffic_gb = payload.get('extra_traffic_gb')
     service_id = payload.get('subscription_service_id')
     cycle_end_at = _parse_payload_datetime(payload.get('traffic_cycle_end_at'))
 
     lines: list[str] = []
     if service_id:
-        lines.append(f'🔢 <b>Услуга:</b> {fmt.quote(str(service_id))}')
+        lines.append(_('🔢 <b>Услуга:</b> {value}').format(value=fmt.quote(str(service_id))))
     if extra_traffic_gb is not None:
-        lines.append(f'➕ <b>Будет начислено:</b> {fmt.quote(str(extra_traffic_gb))} ГБ')
+        lines.append(_('➕ <b>Будет начислено:</b> {value} ГБ').format(value=fmt.quote(str(extra_traffic_gb))))
     if cycle_end_at is not None:
-        lines.append(f'📅 <b>Действует до конца текущего цикла:</b> {format_dt(cycle_end_at)}')
+        lines.append(_('📅 <b>Действует до конца текущего цикла:</b> {value}').format(value=format_dt(cycle_end_at)))
     else:
-        lines.append('📅 <b>Действует:</b> только до конца текущего расчетного периода')
+        lines.append(_('📅 <b>Действует:</b> только до конца текущего расчетного периода'))
 
-    lines.append('♻️ <b>Важно:</b> этот трафик не переносится на следующий цикл и будет обнулён при monthly reset.')
+    lines.append(_('♻️ <b>Важно:</b> этот трафик не переносится на следующий цикл и будет обнулён при monthly reset.'))
     return '\n'.join(lines)
 
 
-def render_invoice_text(invoice: Invoice, user_balance: Decimal) -> str:
+def render_invoice_text(
+    invoice: Invoice,
+    user_balance: Decimal,
+    _: Callable[[str], str] = lambda s: s,
+) -> str:
     payload = invoice.payload_json or {}
     balance_used = money(invoice.balance_used)
     payable = money(invoice.payable_amount)
@@ -281,40 +324,35 @@ def render_invoice_text(invoice: Invoice, user_balance: Decimal) -> str:
 
     if invoice.purpose == InvoicePurpose.tariff:
         traffic = payload.get('monthly_traffic_gb')
-        traffic_label = '♾️ Безлимит трафика каждый месяц' if traffic is None else f'🌐 {traffic} ГБ каждый месяц'
+        traffic_label = _('♾️ Безлимит трафика каждый месяц') if traffic is None else _('🌐 {gb} ГБ каждый месяц').format(gb=traffic)
         discount_percent = Decimal(str(payload.get('discount_percent', '0'))) * 100
-        title = '🧺 <b>Корзина продления</b>' if payload.get('early_renewal') else '🧺 <b>Корзина подписки</b>'
+        title = _('🧺 <b>Корзина продления</b>') if payload.get('early_renewal') else _('🧺 <b>Корзина подписки</b>')
         return (
             f'{title}\n\n'
-            f'🌐 <b>Тариф:</b> {traffic_label}\n'
-            f'📱 <b>Устройства:</b> {fmt.quote(str(payload.get("device_label", "-")))}\n'
-            f'📆 <b>Срок:</b> {payload.get("months", 1)} мес.\n'
-            f'🎁 <b>Скидка:</b> {discount_percent:.1f}%\n\n'
-            f'💳 <b>Стоимость:</b> {total} ₽\n'
-            f'💰 <b>Баланс:</b> {money(user_balance)} ₽\n'
-            f'➖ <b>Списать с баланса:</b> {balance_used} ₽\n'
-            f'🧾 <b>К оплате:</b> {payable} ₽'
+            + _('🌐 <b>Тариф:</b> {value}').format(value=traffic_label) + '\n'
+            + _('📱 <b>Устройства:</b> {value}').format(value=fmt.quote(str(payload.get('device_label', '-')))) + '\n'
+            + _('📆 <b>Срок:</b> {months} мес.').format(months=payload.get('months', 1)) + '\n'
+            + _('🎁 <b>Скидка:</b> {value:.1f}%').format(value=discount_percent) + '\n\n'
+            + _('💳 <b>Стоимость:</b> {value} ₽').format(value=total) + '\n'
+            + _('💰 <b>Баланс:</b> {value} ₽').format(value=money(user_balance)) + '\n'
+            + _('➖ <b>Списать с баланса:</b> {value} ₽').format(value=balance_used) + '\n'
+            + _('🧾 <b>К оплате:</b> {value} ₽').format(value=payable)
         )
 
     if invoice.purpose == InvoicePurpose.topup:
-        cycle_scope = _render_topup_cycle_scope(payload)
-        # FEA-A8: если есть бонусный баланс (например, от промокода) и он
-        # ещё не списан с инвойса — подсказать пользователю про кнопку.
+        cycle_scope = _render_topup_cycle_scope(payload, _)
         balance_hint = ''
         if money(user_balance) > Decimal('0.00') and balance_used <= Decimal('0.00'):
-            balance_hint = (
-                f'\n💡 На балансе есть {money(user_balance)} ₽ — '
-                'можно списать их кнопкой «Использовать баланс».'
-            )
+            balance_hint = '\n' + _('💡 На балансе есть {balance} ₽ — можно списать их кнопкой «Использовать баланс».').format(balance=money(user_balance))
         return (
-            '📦 <b>Докупка трафика</b>\n\n'
-            f'🌐 <b>Пакет:</b> {fmt.quote(str(payload.get("topup_title", "")))}\n'
-            f'{cycle_scope}\n\n'
-            f'💳 <b>Стоимость:</b> {total} ₽\n'
-            f'💰 <b>Баланс:</b> {money(user_balance)} ₽\n'
-            f'➖ <b>Списать с баланса:</b> {balance_used} ₽\n'
-            f'🧾 <b>К оплате:</b> {payable} ₽'
-            f'{balance_hint}'
+            _('📦 <b>Докупка трафика</b>') + '\n\n'
+            + _('🌐 <b>Пакет:</b> {value}').format(value=fmt.quote(str(payload.get('topup_title', '')))) + '\n'
+            + f'{cycle_scope}\n\n'
+            + _('💳 <b>Стоимость:</b> {value} ₽').format(value=total) + '\n'
+            + _('💰 <b>Баланс:</b> {value} ₽').format(value=money(user_balance)) + '\n'
+            + _('➖ <b>Списать с баланса:</b> {value} ₽').format(value=balance_used) + '\n'
+            + _('🧾 <b>К оплате:</b> {value} ₽').format(value=payable)
+            + f'{balance_hint}'
         )
 
     if invoice.purpose == InvoicePurpose.device_topup:
@@ -322,25 +360,25 @@ def render_invoice_text(invoice: Invoice, user_balance: Decimal) -> str:
         new_count = int(payload.get('new_device_count') or 0)
         cycle_end_at = _parse_payload_datetime(payload.get('traffic_cycle_end_at'))
         price_mode = (payload.get('price_mode') or 'prorated').strip().lower()
-        mode_label = 'фиксированная цена' if price_mode == 'fixed' else 'пропорционально оставшимся дням'
+        mode_label = _('фиксированная цена') if price_mode == 'fixed' else _('пропорционально оставшимся дням')
         cycle_line = (
-            f'📅 <b>Действует до конца текущего цикла:</b> {format_dt(cycle_end_at)}'
+            _('📅 <b>Действует до конца текущего цикла:</b> {value}').format(value=format_dt(cycle_end_at))
             if cycle_end_at is not None
-            else '📅 <b>Действует:</b> только до конца текущего расчетного периода'
+            else _('📅 <b>Действует:</b> только до конца текущего расчетного периода')
         )
         return (
-            '➕ <b>Добавление устройства</b>\n\n'
-            f'📱 <b>Лимит устройств:</b> {previous_count} → {new_count}\n'
-            f'{cycle_line}\n'
-            f'💸 <b>Расчёт:</b> {mode_label}\n\n'
-            f'💳 <b>Стоимость:</b> {total} ₽\n'
-            f'🧾 <b>К оплате:</b> {payable} ₽'
+            _('➕ <b>Добавление устройства</b>') + '\n\n'
+            + _('📱 <b>Лимит устройств:</b> {prev} → {new}').format(prev=previous_count, new=new_count) + '\n'
+            + f'{cycle_line}\n'
+            + _('💸 <b>Расчёт:</b> {value}').format(value=mode_label) + '\n\n'
+            + _('💳 <b>Стоимость:</b> {value} ₽').format(value=total) + '\n'
+            + _('🧾 <b>К оплате:</b> {value} ₽').format(value=payable)
         )
 
     return (
-        '💳 <b>Пополнение баланса</b>\n\n'
-        f'💰 <b>Сумма пополнения:</b> {total} ₽\n'
-        f'🧾 <b>К оплате:</b> {payable} ₽'
+        _('💳 <b>Пополнение баланса</b>') + '\n\n'
+        + _('💰 <b>Сумма пополнения:</b> {value} ₽').format(value=total) + '\n'
+        + _('🧾 <b>К оплате:</b> {value} ₽').format(value=payable)
     )
 
 
@@ -370,15 +408,20 @@ def _render_device_topup_preview(quote, expire_at: datetime | None) -> str:
     )
 
 
-@router.message(F.text == '💳 Пополнить')
-async def balance_topup_menu(message: Message, state: FSMContext, session: AsyncSession) -> None:
+@router.message(F.text.in_(all_translations('💳 Пополнить')))
+async def balance_topup_menu(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    _: Callable[[str], str] = lambda s: s,
+) -> None:
     min_topup_amount = await _get_min_topup_amount(session)
     initial_amount = max(300, min_topup_amount)
 
     await state.set_state(PurchaseState.waiting_balance_topup_amount)
     await state.update_data(balance_topup_amount=initial_amount)
     await message.answer(
-        render_balance_topup_prompt(initial_amount, min_topup_amount),
+        render_balance_topup_prompt(initial_amount, min_topup_amount, _),
         reply_markup=balance_topup_keyboard(initial_amount, min_amount=min_topup_amount),
     )
 
@@ -390,47 +433,54 @@ async def balance_state_menu_navigation(
     session: AsyncSession,
     settings: Settings,
     marzban: MarzbanClient,
+    _: Callable[[str], str],
 ) -> None:
     await state.clear()
-    if message.text == '💳 Пополнить':
-        await balance_topup_menu(message, state, session)
+    msgid = _match_main_menu_msgid(message.text)
+    if msgid == '💳 Пополнить':
+        await balance_topup_menu(message, state, session, _)
         return
-    if message.text == '👤 Мой профиль':
+    if msgid == '👤 Мой профиль':
         from app.handlers.profile import profile_home
         await profile_home(message, session, state)
         return
-    if message.text == '👑 Мой VPN':
+    if msgid == '👑 Мой VPN':
         from app.handlers.vpn import my_vpn
-        await my_vpn(message, session, settings, marzban)
+        await my_vpn(message, session, settings, marzban, _)
         return
-    if message.text == '📞 Поддержка':
+    if msgid == '📞 Поддержка':
         from app.handlers.support import support_home
         await support_home(message, session)
         return
-    if message.text == '📜 Правила сервиса':
+    if msgid == '📜 Правила сервиса':
         from app.handlers.rules import rules_menu
         await rules_menu(message)
         return
-    await _reply_main_menu(message, session, settings, 'Выберите действие ниже.')
+    await _reply_main_menu(message, session, settings, _('Выберите действие ниже.'), _=_)
 
 
 @router.message(PurchaseState.waiting_balance_topup_amount, ~F.text.startswith('/'))
-async def balance_topup_input(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def balance_topup_input(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    _: Callable[[str], str],
+) -> None:
     min_topup_amount = await _get_min_topup_amount(session)
     text = (message.text or '').strip()
     try:
         amount = int(Decimal(text))
     except (InvalidOperation, ValueError):
-        await message.answer('Введите сумму цифрами, например: 300')
+        await message.answer(_('Введите сумму цифрами, например: 300'))
         return
 
     if amount < min_topup_amount:
-        await message.answer(f'Минимальная сумма пополнения — {_format_amount_label(min_topup_amount)} ₽')
+        await message.answer(_('Минимальная сумма пополнения — {value} ₽').format(value=_format_amount_label(min_topup_amount)))
         return
 
     await state.update_data(balance_topup_amount=amount)
     await message.answer(
-        render_balance_topup_prompt(amount, min_topup_amount),
+        render_balance_topup_prompt(amount, min_topup_amount, _),
         reply_markup=balance_topup_keyboard(amount, min_amount=min_topup_amount),
     )
 
@@ -444,6 +494,7 @@ async def balance_amount_callbacks(
     settings: Settings,
     marzban: MarzbanClient,
     payments: PaymentProvider,
+    _: Callable[[str], str],
 ) -> None:
     min_topup_amount = await _get_min_topup_amount(session)
     current_data = await state.get_data()
@@ -458,7 +509,7 @@ async def balance_amount_callbacks(
         await state.clear()
         if callback.message:
             await safe_edit_reply_markup(callback.message, reply_markup=None)
-            await _reply_main_menu(callback, session, settings, '👌 Пополнение отменено.')
+            await _reply_main_menu(callback, session, settings, _('👌 Пополнение отменено.'), _=_)
         await safe_callback_answer(callback)
         return
 
@@ -466,21 +517,21 @@ async def balance_amount_callbacks(
         if amount == current_amount:
             await safe_callback_answer(
                 callback,
-                f'Минимальная сумма пополнения — {_format_amount_label(min_topup_amount)} ₽'
+                _('Минимальная сумма пополнения — {value} ₽').format(value=_format_amount_label(min_topup_amount))
                 if amount <= min_topup_amount
-                else 'Сумма уже выбрана',
+                else _('Сумма уже выбрана'),
             )
             return
 
         await state.update_data(balance_topup_amount=amount)
         changed = await safe_edit_message_text(
             callback.message,
-            render_balance_topup_prompt(amount, min_topup_amount),
+            render_balance_topup_prompt(amount, min_topup_amount, _),
             reply_markup=balance_topup_keyboard(amount, min_amount=min_topup_amount),
         )
         await safe_callback_answer(
             callback,
-            'Сумма обновлена' if changed else f'Минимальная сумма пополнения — {_format_amount_label(min_topup_amount)} ₽',
+            _('Сумма обновлена') if changed else _('Минимальная сумма пополнения — {value} ₽').format(value=_format_amount_label(min_topup_amount)),
         )
         return
 
@@ -488,7 +539,7 @@ async def balance_amount_callbacks(
         if amount < min_topup_amount:
             await safe_callback_answer(
                 callback,
-                f'Минимальная сумма пополнения — {_format_amount_label(min_topup_amount)} ₽',
+                _('Минимальная сумма пополнения — {value} ₽').format(value=_format_amount_label(min_topup_amount)),
                 show_alert=True,
             )
             return
@@ -516,11 +567,11 @@ async def balance_amount_callbacks(
         await state.clear()
         await safe_edit_message_text(
             callback.message,
-            render_invoice_text(invoice, user.balance),
+            render_invoice_text(invoice, user.balance, _),
             reply_markup=invoice_cart_keyboard(invoice, user.balance),
             disable_web_page_preview=True,
         )
-        await safe_callback_answer(callback, 'Счет создан')
+        await safe_callback_answer(callback, _('Счет создан'))
 
 
 @router.callback_query(DeviceModeCallback.filter())
