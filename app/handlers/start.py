@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from aiogram import Router
 from aiogram.filters import CommandStart
@@ -27,7 +28,10 @@ TARIFF_TOKEN_RE = re.compile(r'^tariff_([A-Za-z0-9_\-]{8,64})$')
 
 
 async def _try_unlock_tariff_by_token(
-    session: AsyncSession, user_tg_id: int, token: str
+    session: AsyncSession,
+    user_tg_id: int,
+    token: str,
+    _: Callable[[str], str],
 ) -> tuple[bool, str | None]:
     """FEA-ADMIN-TARIFF-PLUS: deep-link `start=tariff_<token>` →
     разблокировать тариф для текущего пользователя.
@@ -62,8 +66,9 @@ async def _try_unlock_tariff_by_token(
             },
         )
     return True, (
-        f'🔓 Тариф «{plan.title}» разблокирован для вашего аккаунта.\n'
-        'Откройте «Купить VPN», чтобы оформить подписку по нему.'
+        _('🔓 Тариф «{title}» разблокирован для вашего аккаунта.').format(title=plan.title)
+        + '\n'
+        + _('Откройте «Купить VPN», чтобы оформить подписку по нему.')
     )
 
 
@@ -77,7 +82,12 @@ async def _is_admin_user(session: AsyncSession, tg_id: int, settings: Settings) 
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession, settings: Settings) -> None:
+async def cmd_start(
+    message: Message,
+    session: AsyncSession,
+    settings: Settings,
+    _: Callable[[str], str],
+) -> None:
     user = await get_or_create_user(message, session)
 
     # deep-link: /start ref123 | /start tariff_<token>
@@ -87,22 +97,25 @@ async def cmd_start(message: Message, session: AsyncSession, settings: Settings)
         m_ref = REF_RE.match(payload)
         if m_ref:
             inviter_tg_id = int(m_ref.group(1))
-            bound, _ = await ReferralService(session).bind_inviter_by_link(user.tg_id, inviter_tg_id)
+            bound, _bind_msg = await ReferralService(session).bind_inviter_by_link(user.tg_id, inviter_tg_id)
             if bound:
-                await message.answer('🎉 Приглашение принято. Реферальный бонус будет начислен после вашей первой оплаты.')
+                await message.answer(_('🎉 Приглашение принято. Реферальный бонус будет начислен после вашей первой оплаты.'))
         else:
             m_tariff = TARIFF_TOKEN_RE.match(payload)
             if m_tariff:
-                _, unlock_msg = await _try_unlock_tariff_by_token(session, user.tg_id, m_tariff.group(1))
+                _unlocked, unlock_msg = await _try_unlock_tariff_by_token(
+                    session, user.tg_id, m_tariff.group(1), _
+                )
                 if unlock_msg:
                     await message.answer(unlock_msg)
 
     is_admin = await _is_admin_user(session, user.tg_id, settings)
 
     await message.answer(
-        'Привет! 👋\n\nВыберите действие в меню ниже.',
+        _('Привет! 👋\n\nВыберите действие в меню ниже.'),
         reply_markup=main_menu(
             show_trial=not bool(user.trial_issued_at),
             show_admin=is_admin,
+            translator=_,
         ),
     )
