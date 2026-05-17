@@ -60,6 +60,19 @@ def _service(session: AsyncSession, settings: Settings, marzban: MarzbanClient) 
     return SubscriptionService(session, settings, marzban)
 
 
+def _build_setup_landing_url(settings: Settings, service_id: str | None) -> str | None:
+    """FEA-B18: URL для public landing с авто-детектом OS.
+
+    Возвращает `{PUBLIC_BOT_BASE_URL}/setup/{service_id}` если оба значения
+    есть; иначе None — кнопка «📱 На этом устройстве» не показывается.
+    """
+    base = (getattr(settings, 'public_bot_base_url', None) or '').strip().rstrip('/')
+    sid = (service_id or '').strip()
+    if not base or not sid:
+        return None
+    return f'{base}/setup/{sid}'
+
+
 def _status_label(subscription: Subscription, status: str | None) -> str:
     if status in {'expired', 'disabled'}:
         return '🔴 Неактивный'
@@ -436,8 +449,17 @@ async def _details_screen(
     await safe_edit_message_text(target, text, reply_markup=keyboard)
 
 
-async def _device_menu_screen(target: Message, subscription_id: int) -> None:
-    await safe_edit_message_text(target, SCREEN2_TEXT, reply_markup=device_keyboard(subscription_id))
+async def _device_menu_screen(
+    target: Message,
+    subscription_id: int,
+    *,
+    setup_landing_url: str | None = None,
+) -> None:
+    await safe_edit_message_text(
+        target,
+        SCREEN2_TEXT,
+        reply_markup=device_keyboard(subscription_id, setup_landing_url=setup_landing_url),
+    )
 
 
 async def _device_os_screen(
@@ -703,20 +725,37 @@ async def vpn_details(
 
 
 @router.callback_query(VpnCallback.filter(F.action == 'device_menu'))
-async def device_menu(callback: CallbackQuery, callback_data: VpnCallback, session: AsyncSession) -> None:
+async def device_menu(
+    callback: CallbackQuery,
+    callback_data: VpnCallback,
+    session: AsyncSession,
+    settings: Settings,
+) -> None:
     user = await get_or_create_user(callback, session)
     subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
     if not subscription:
         await safe_callback_answer(callback, 'Подписка не найдена', show_alert=True)
         return
 
-    await _device_menu_screen(callback.message, subscription.id)
+    setup_url = _build_setup_landing_url(settings, getattr(subscription, 'service_id', None))
+    await _device_menu_screen(callback.message, subscription.id, setup_landing_url=setup_url)
     await safe_callback_answer(callback)
 
 
 @router.callback_query(DeviceInfoCallback.filter(F.action == 'device_menu'))
-async def device_menu_back(callback: CallbackQuery, callback_data: DeviceInfoCallback) -> None:
-    await _device_menu_screen(callback.message, callback_data.subscription_id)
+async def device_menu_back(
+    callback: CallbackQuery,
+    callback_data: DeviceInfoCallback,
+    session: AsyncSession,
+    settings: Settings,
+) -> None:
+    user = await get_or_create_user(callback, session)
+    subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
+    setup_url = _build_setup_landing_url(
+        settings,
+        getattr(subscription, 'service_id', None) if subscription else None,
+    )
+    await _device_menu_screen(callback.message, callback_data.subscription_id, setup_landing_url=setup_url)
     await safe_callback_answer(callback)
 
 
@@ -793,13 +832,27 @@ async def show_key(
 
 
 @router.callback_query(VpnCallback.filter(F.action == 'back_from_key'))
-async def back_from_key(callback: CallbackQuery, callback_data: VpnCallback) -> None:
+async def back_from_key(
+    callback: CallbackQuery,
+    callback_data: VpnCallback,
+    session: AsyncSession,
+    settings: Settings,
+) -> None:
     try:
         await callback.message.delete()
     except TelegramBadRequest:
         pass
 
-    await callback.message.answer(SCREEN2_TEXT, reply_markup=device_keyboard(callback_data.subscription_id))
+    user = await get_or_create_user(callback, session)
+    subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
+    setup_url = _build_setup_landing_url(
+        settings,
+        getattr(subscription, 'service_id', None) if subscription else None,
+    )
+    await callback.message.answer(
+        SCREEN2_TEXT,
+        reply_markup=device_keyboard(callback_data.subscription_id, setup_landing_url=setup_url),
+    )
     await safe_callback_answer(callback)
 
 

@@ -529,9 +529,24 @@ def balance_topup_keyboard(amount: int, *, min_amount: int = 50, step_amount: in
     )
 
 
-def device_keyboard(subscription_id: int) -> InlineKeyboardMarkup:
+def device_keyboard(
+    subscription_id: int,
+    *,
+    setup_landing_url: str | None = None,
+) -> InlineKeyboardMarkup:
+    """Клавиатура выбора устройства для установки.
+
+    Если задан `setup_landing_url` (FEA-B18: PUBLIC_BOT_BASE_URL/setup/<sid>) —
+    показываем сверху одиночную кнопку «📱 На этом устройстве», открывающую
+    публичный лендинг с авто-детектом ОС по User-Agent. Если URL не
+    сконфигурирован — оставляем только ручной grid.
+    """
     devices = ['iOS', 'Android', 'macOS', 'Windows', 'Linux', 'AndroidTV']
     rows: list[list[InlineKeyboardButton]] = []
+    if setup_landing_url:
+        rows.append([
+            InlineKeyboardButton(text='📱 На этом устройстве', url=setup_landing_url),
+        ])
     for left, right in zip(devices[::2], devices[1::2]):
         rows.append([
             InlineKeyboardButton(text=left, callback_data=DeviceInfoCallback(action='os_info', subscription_id=subscription_id, os_name=left).pack()),
