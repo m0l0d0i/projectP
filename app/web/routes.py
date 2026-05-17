@@ -16,7 +16,7 @@ import shutil
 import tempfile
 import time
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +24,7 @@ from typing import Any
 from urllib.parse import quote_plus, urlparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +67,10 @@ from app.db.repositories import (
     TransactionRepository,
     UserRepository,
     WebAdminUserRepository,
+)
+from app.db.repositories.node_health import (
+    NodeHealthRangePoint,
+    NodeHealthSampleRepository,
 )
 from app.db.repositories.node_registry import NodeRegistryRepository
 from app.services.broadcasts import BroadcastService, BroadcastValidationError
@@ -8095,6 +8099,128 @@ async def admin_nodes_update(
                 await marzban.close()
 
     return _redirect_with_message('/admin/nodes/', error='Неизвестное действие')
+
+
+_NODE_PROBE_RANGES: dict[str, dict[str, Any]] = {
+    '1h': {'hours': 1, 'bucket_seconds': None, 'label': '1 час'},
+    '24h': {'hours': 24, 'bucket_seconds': 60, 'label': '24 часа'},
+    '7d': {'hours': 24 * 7, 'bucket_seconds': 3600, 'label': '7 дней'},
+}
+
+
+def _serialize_probe_point(point: NodeHealthRangePoint) -> dict[str, Any]:
+    return {
+        'ts': point.ts.isoformat(),
+        'latency_ms': point.latency_ms_avg,
+        'users_online': point.users_online_avg,
+        'users_total': point.users_total_avg,
+        'ok': point.ok_count,
+        'fail': point.fail_count,
+    }
+
+
+async def _load_probe_samples(
+    session,
+    *,
+    node_id: int,
+    range_key: str,
+) -> tuple[dict[str, Any], str]:
+    """Грузит точки графика для ноды + резолвит meta для UI.
+
+    Возвращает (payload, resolved_range_key). Если `range_key` неизвестен —
+    дефолтится в '24h'. payload содержит `points`, `bucket_seconds`, `range`,
+    `since`/`until` (ISO) — клиентский JS отрисует это в Canvas.
+    """
+    resolved = range_key if range_key in _NODE_PROBE_RANGES else '24h'
+    cfg = _NODE_PROBE_RANGES[resolved]
+    until = datetime.now(timezone.utc)
+    since = until - timedelta(hours=cfg['hours'])
+
+    repo = NodeHealthSampleRepository(session)
+    points = await repo.range_for_node(
+        node_id,
+        since=since,
+        until=until,
+        bucket_seconds=cfg['bucket_seconds'],
+    )
+    return (
+        {
+            'range': resolved,
+            'range_label': cfg['label'],
+            'bucket_seconds': cfg['bucket_seconds'],
+            'since': since.isoformat(),
+            'until': until.isoformat(),
+            'points': [_serialize_probe_point(p) for p in points],
+        },
+        resolved,
+    )
+
+
+@router.get('/admin/nodes/{node_id}', response_class=HTMLResponse, dependencies=[Depends(require_any)])
+async def admin_node_detail(
+    request: Request,
+    node_id: int,
+    range: str = Query(default='24h'),
+):
+    templates = request.app.state.templates
+    sessionmaker = request.app.state.sessionmaker
+
+    async with sessionmaker.begin() as session:
+        node_repo = NodeRegistryRepository(session)
+        sample_repo = NodeHealthSampleRepository(session)
+        node = await node_repo.get_by_id(node_id)
+        if node is None:
+            return _redirect_with_message('/admin/nodes/', error=f'Узел id={node_id} не найден')
+
+        chart_payload, resolved_range = await _load_probe_samples(
+            session, node_id=node_id, range_key=range,
+        )
+        latest_sample = await sample_repo.latest_for_node(node_id)
+
+    row_summary = _node_row_for_admin(node)
+    latest_payload: dict[str, Any] | None = None
+    if latest_sample is not None:
+        latest_payload = {
+            'ts': format_dt(latest_sample.ts),
+            'status': latest_sample.status.value,
+            'latency_ms': latest_sample.latency_ms,
+            'users_online': latest_sample.users_online,
+            'users_total': latest_sample.users_total,
+            'error_text': (latest_sample.error_text or '').strip() or None,
+        }
+
+    return templates.TemplateResponse(
+        request,
+        'admin_node_detail.html',
+        {
+            'current_page': 'nodes',
+            'node': node,
+            'row': row_summary,
+            'latest_sample': latest_payload,
+            'range_key': resolved_range,
+            'range_options': [
+                {'key': key, 'label': cfg['label']} for key, cfg in _NODE_PROBE_RANGES.items()
+            ],
+            'chart_data_json': json.dumps(chart_payload, ensure_ascii=False),
+            'success_message': request.query_params.get('success'),
+            'error_message': request.query_params.get('error'),
+        },
+    )
+
+
+@router.get('/admin/nodes/{node_id}/samples.json', dependencies=[Depends(require_any)])
+async def admin_node_samples_json(
+    request: Request,
+    node_id: int,
+    range: str = Query(default='24h'),
+):
+    sessionmaker = request.app.state.sessionmaker
+    async with sessionmaker.begin() as session:
+        node = await NodeRegistryRepository(session).get_by_id(node_id)
+        if node is None:
+            return JSONResponse({'error': 'node_not_found'}, status_code=404)
+        payload, _ = await _load_probe_samples(session, node_id=node_id, range_key=range)
+    return JSONResponse(payload)
 
 
 @router.get('/admin/routing-profiles/', response_class=HTMLResponse, dependencies=[Depends(require_any)])

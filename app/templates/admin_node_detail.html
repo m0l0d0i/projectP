@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}{{ node.display_name }} — детали узла{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="text-sm text-slate-400">Главная / <a href="/admin/nodes/" class="hover:text-cyan-300">Реестр узлов</a> / {{ node.code }}</div>
+      <h1 class="text-3xl font-bold text-white">
+        {{ node.display_name }}
+        <span class="ml-2 text-base text-slate-400">({{ node.code }})</span>
+      </h1>
+      <p class="mt-2 max-w-3xl text-slate-400">
+        Live-статистика probe-job <code class="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">probe_nodes_health</code>
+        (каждые 90 сек). Графики переведены на серверный downsample:
+        1 точка/минуту для 24ч, 1 точка/час для 7д. TTL замеров — 30 дней.
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-3">
+      <a
+        href="/admin/nodes/"
+        class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-500 hover:text-white"
+      >
+        ← К списку узлов
+      </a>
+    </div>
+  </div>
+
+  {% if success_message %}
+    <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+      ✅ {{ success_message }}
+    </div>
+  {% endif %}
+  {% if error_message %}
+    <div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+      ❌ {{ error_message }}
+    </div>
+  {% endif %}
+
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-sm text-slate-400">Last latency</div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ row.last_latency_label }}</div>
+      <div class="mt-2 text-xs text-slate-500">{{ row.last_probe_at_display }}</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-sm text-slate-400">Users online / total</div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ row.last_users_label }}</div>
+      <div class="mt-2 text-xs text-slate-500">{% if node.is_default %}default-узел (Marzban /api/system){% else %}только для default-узла{% endif %}</div>
+    </div>
+    <div class="rounded-3xl border {% if row.is_alerting_probe %}border-rose-500/30 bg-rose-500/5{% elif row.is_degraded_probe %}border-amber-500/30 bg-amber-500/5{% else %}border-emerald-500/20 bg-emerald-500/5{% endif %} p-5 shadow-xl">
+      <div class="text-sm text-slate-400">Consecutive fails</div>
+      <div class="mt-2 text-3xl font-bold text-white">{{ row.consecutive_fail_count }}</div>
+      <div class="mt-2 text-xs text-slate-500">порог node_down алерта — 5</div>
+    </div>
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+      <div class="text-sm text-slate-400">Health (агрегат)</div>
+      <div class="mt-2 text-2xl font-bold text-white">{{ row.health_status }}</div>
+      <div class="mt-2 text-xs text-slate-500">sync: {{ row.sync_state_label }}</div>
+    </div>
+  </div>
+
+  {% if latest_sample %}
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+    <h2 class="text-lg font-semibold text-white">Последний probe-замер</h2>
+    <dl class="mt-3 grid gap-3 text-sm text-slate-300 sm:grid-cols-2 lg:grid-cols-4">
+      <div><dt class="text-slate-500">ts</dt><dd>{{ latest_sample.ts }}</dd></div>
+      <div><dt class="text-slate-500">status</dt><dd>{{ latest_sample.status }}</dd></div>
+      <div><dt class="text-slate-500">latency_ms</dt><dd>{{ latest_sample.latency_ms if latest_sample.latency_ms is not none else '—' }}</dd></div>
+      <div><dt class="text-slate-500">users (online/total)</dt><dd>{{ latest_sample.users_online if latest_sample.users_online is not none else '—' }} / {{ latest_sample.users_total if latest_sample.users_total is not none else '—' }}</dd></div>
+    </dl>
+    {% if latest_sample.error_text %}
+      <div class="mt-3 break-words rounded-xl border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-xs text-rose-200">
+        <span class="font-semibold">error_text:</span> {{ latest_sample.error_text }}
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <h2 class="text-xl font-semibold text-white">Графики probe</h2>
+      <div class="flex flex-wrap gap-2" id="node-charts-range-switcher">
+        {% for option in range_options %}
+          <button
+            type="button"
+            data-range="{{ option.key }}"
+            class="rounded-xl border px-3 py-2 text-sm font-semibold {{ 'border-cyan-500 bg-cyan-500/10 text-cyan-200' if option.key == range_key else 'border-slate-700 bg-slate-950 text-slate-300 hover:border-cyan-500 hover:text-white' }}"
+          >
+            {{ option.label }}
+          </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="mt-5 grid gap-6 lg:grid-cols-2">
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-slate-200">Latency, ms</h3>
+          <span class="text-xs text-slate-500" data-chart-empty-for="latency" hidden>нет данных</span>
+        </div>
+        <canvas
+          id="node-chart-latency"
+          width="800"
+          height="240"
+          class="mt-3 w-full"
+          aria-label="Latency probe over time"
+        ></canvas>
+      </div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-slate-200">Users online</h3>
+          <span class="text-xs text-slate-500" data-chart-empty-for="users" hidden>нет данных</span>
+        </div>
+        <canvas
+          id="node-chart-users"
+          width="800"
+          height="240"
+          class="mt-3 w-full"
+          aria-label="Users online over time"
+        ></canvas>
+      </div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-950 p-4 lg:col-span-2">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-slate-200">Probe status timeline (ok / fail)</h3>
+          <span class="text-xs text-slate-500" data-chart-empty-for="status" hidden>нет данных</span>
+        </div>
+        <canvas
+          id="node-chart-status"
+          width="1600"
+          height="80"
+          class="mt-3 w-full"
+          aria-label="Probe status timeline"
+        ></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script type="application/json" id="node-charts-initial-data">{{ chart_data_json | safe }}</script>
+  <script
+    src="/static/admin_node_detail.js"
+    data-node-id="{{ node.id }}"
+    data-initial-range="{{ range_key }}"
+    defer
+  ></script>
+</div>
+{% endblock %}
