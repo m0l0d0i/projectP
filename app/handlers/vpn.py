@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
 from urllib.parse import urlparse
@@ -16,6 +17,7 @@ from app.config import Settings
 from app.db.models import Subscription
 from app.db.repositories import AppLinkRepository, AppSettingsRepository, SubscriptionRepository, UserRepository
 from app.handlers.common import get_or_create_user
+from app.i18n import all_translations, gettext_lazy as _l
 from app.keyboards.inline import (
     DeviceInfoCallback,
     NotificationCallback,
@@ -48,12 +50,15 @@ from app.utils.telegram import safe_callback_answer, safe_edit_message_text
 router = Router(name='vpn')
 logger = logging.getLogger(__name__)
 
-SCREEN2_TEXT = '📱 💻 Выберите свое устройство из предложенного списка:'
-SCREEN3_WITH_LINKS_TEXT = '🌐 Подключение к VPN VLESS:'
-SCREEN3_EMPTY_TEXT = (
+SCREEN2_TEXT = _l('📱 💻 Выберите свое устройство из предложенного списка:')
+SCREEN3_WITH_LINKS_TEXT = _l('🌐 Подключение к VPN VLESS:')
+SCREEN3_EMPTY_TEXT = _l(
     'К сожалению, инструкции/ссылки на приложение для этого устройства ещё нет 😔 '
     'Если хотите помочь записать процесс установки/посоветовать приложение, пожалуйста, обратитесь в поддержку 📩🙏.'
 )
+
+MAIN_MENU_VPN_BUTTON = '👑 Мой VPN'
+MAIN_MENU_TRIAL_BUTTON = '🎁 Тест на 24 часа'
 
 
 def _service(session: AsyncSession, settings: Settings, marzban: MarzbanClient) -> SubscriptionService:
@@ -122,10 +127,13 @@ def _format_device_label(device_count: int) -> str:
     return f'{device_count} {word}'
 
 
-def _subscription_link_keyboard(subscription_url: str) -> InlineKeyboardMarkup:
+def _subscription_link_keyboard(
+    subscription_url: str,
+    _: Callable[[str], str] = lambda s: s,
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text='🌐 Страница вашей подписки', url=subscription_url)],
+            [InlineKeyboardButton(text=_('🌐 Страница вашей подписки'), url=subscription_url)],
         ]
     )
 
@@ -155,11 +163,11 @@ def _reset_traffic_quote_keyboard(subscription_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def _render_purchase_entry_text(*, early: bool = False) -> str:
-    title = 'Продление подписки' if early else 'Оформление новой подписки'
+def _render_purchase_entry_text(_: Callable[[str], str], *, early: bool = False) -> str:
+    title = _('Продление подписки') if early else _('Оформление новой подписки')
     return (
         f'🌐 <b>{title}</b>\n\n'
-        'Выберите режим устройств:'
+        + _('Выберите режим устройств:')
     )
 
 
@@ -292,18 +300,21 @@ def _render_reset_quote_text(
     subscription: Subscription,
     quote: ResetTrafficQuote,
     balance: Decimal,
+    _: Callable[[str], str],
 ) -> str:
     days_left = max(1, int(getattr(quote, 'days_left_in_month', 1) or 1))
     days_total = max(days_left, int(getattr(quote, 'days_in_month', days_left) or days_left))
 
     return (
-        '♻️ <b>Сброс трафика</b>\n\n'
-        f'Услуга: <b>{fmt.quote(subscription.service_id)}</b>\n'
-        f'Стоимость сброса: <b>{quote.reset_price} ₽</b>\n'
-        f'Цена тарифа за цикл: <b>{quote.monthly_price} ₽</b>\n'
-        f'До конца текущего цикла: <b>{days_left} {_format_day_word(days_left)}</b> из <b>{days_total}</b>\n'
-        f'Ваш баланс: <b>{balance} ₽</b>\n\n'
-        'После подтверждения трафик будет сброшен, а сумма сразу спишется с баланса.'
+        _('♻️ <b>Сброс трафика</b>') + '\n\n'
+        + _('Услуга: <b>{value}</b>').format(value=fmt.quote(subscription.service_id)) + '\n'
+        + _('Стоимость сброса: <b>{value} ₽</b>').format(value=quote.reset_price) + '\n'
+        + _('Цена тарифа за цикл: <b>{value} ₽</b>').format(value=quote.monthly_price) + '\n'
+        + _('До конца текущего цикла: <b>{days_left} {word}</b> из <b>{days_total}</b>').format(
+            days_left=days_left, word=_format_day_word(days_left), days_total=days_total,
+        ) + '\n'
+        + _('Ваш баланс: <b>{value} ₽</b>').format(value=balance) + '\n\n'
+        + _('После подтверждения трафик будет сброшен, а сумма сразу спишется с баланса.')
     )
 
 
@@ -385,20 +396,21 @@ async def _services_screen(
     *,
     session: AsyncSession,
     user_id: int,
+    _: Callable[[str], str],
 ) -> None:
     subs = await SubscriptionRepository(session).list_by_user_id(user_id)
     active_services = [(s.id, s.is_alive_local, s.service_id) for s in subs if s.is_alive_local]
     if not active_services:
         await safe_edit_message_text(
             target,
-            '🌐 <b>Подключение VPN</b>\n\nВыберите режим устройств:',
+            _('🌐 <b>Подключение VPN</b>\n\nВыберите режим устройств:'),
             reply_markup=device_mode_keyboard(),
         )
         return
 
     await safe_edit_message_text(
         target,
-        '👑 <b>Мой VPN</b>\n\nВыберите услугу:',
+        _('👑 <b>Мой VPN</b>\n\nВыберите услугу:'),
         reply_markup=vpn_services_keyboard(active_services),
     )
 
@@ -410,16 +422,17 @@ async def _details_screen(
     settings: Settings,
     marzban: MarzbanClient,
     subscription: Subscription,
+    _: Callable[[str], str],
 ) -> None:
     view = await _load_subscription_view(session, settings, marzban, subscription)
 
     extra_block = ''
     keyboard = vpn_details_keyboard(subscription.id)
     if subscription.is_trial:
-        extra_block = '\n\n🎁 <b>Тестовая подписка</b>\nПродление, сброс трафика и докупка трафика недоступны.'
+        extra_block = '\n\n' + _('🎁 <b>Тестовая подписка</b>\nПродление, сброс трафика и докупка трафика недоступны.')
         keyboard = _trial_details_keyboard(subscription.id)
     elif _is_unlimited_subscription(subscription):
-        extra_block = '\n\n♾️ <b>Безлимитный тариф</b>\nДокупка трафика для этого тарифа не требуется и недоступна.'
+        extra_block = '\n\n' + _('♾️ <b>Безлимитный тариф</b>\nДокупка трафика для этого тарифа не требуется и недоступна.')
         keyboard = _unlimited_details_keyboard(subscription.id)
     else:
         keyboard = vpn_details_keyboard(
@@ -427,24 +440,24 @@ async def _details_screen(
             can_add_device=await _can_add_device(session, subscription),
         )
         traffic_lines = [
-            f'Базовый трафик цикла: {view["cycle_base_label"]}',
-            f'Использованный трафик: {view["used_label"]}',
+            _('Базовый трафик цикла: {value}').format(value=view['cycle_base_label']),
+            _('Использованный трафик: {value}').format(value=view['used_label']),
         ]
         if view['has_cycle_extra']:
-            traffic_lines.insert(1, f'Доп. трафик текущего цикла: +{view["cycle_extra_label"]}')
-            traffic_lines.insert(2, f'Доступно в текущем цикле: {view["cycle_total_label"]}')
+            traffic_lines.insert(1, _('Доп. трафик текущего цикла: +{value}').format(value=view['cycle_extra_label']))
+            traffic_lines.insert(2, _('Доступно в текущем цикле: {value}').format(value=view['cycle_total_label']))
         else:
-            traffic_lines.insert(1, f'Предоставленный трафик: {view["provided_label"]}')
+            traffic_lines.insert(1, _('Предоставленный трафик: {value}').format(value=view['provided_label']))
         if view['traffic_cycle_end_dt'] is not None:
-            traffic_lines.append(f'Текущий цикл до: {format_dt(view["traffic_cycle_end_dt"])}')
+            traffic_lines.append(_('Текущий цикл до: {value}').format(value=format_dt(view['traffic_cycle_end_dt'])))
         extra_block = '\n' + '\n'.join(traffic_lines)
 
     text = (
-        '🌐 Информация о вашей услуге:\n\n'
-        f'Статус: {view["status_label"]}\n'
-        f'Дата окончания: {format_dt(view["expire_dt"])}\n'
-        f'Номер услуги: {subscription.service_id}'
-        f'{extra_block}'
+        _('🌐 Информация о вашей услуге:') + '\n\n'
+        + _('Статус: {value}').format(value=view['status_label']) + '\n'
+        + _('Дата окончания: {value}').format(value=format_dt(view['expire_dt'])) + '\n'
+        + _('Номер услуги: {value}').format(value=subscription.service_id)
+        + f'{extra_block}'
     )
     await safe_edit_message_text(target, text, reply_markup=keyboard)
 
@@ -454,11 +467,12 @@ async def _device_menu_screen(
     subscription_id: int,
     *,
     setup_landing_url: str | None = None,
+    _: Callable[[str], str],
 ) -> None:
     await safe_edit_message_text(
         target,
-        SCREEN2_TEXT,
-        reply_markup=device_keyboard(subscription_id, setup_landing_url=setup_landing_url),
+        _(SCREEN2_TEXT),
+        reply_markup=device_keyboard(subscription_id, setup_landing_url=setup_landing_url, translator=_),
     )
 
 
@@ -468,6 +482,7 @@ async def _device_os_screen(
     session: AsyncSession,
     subscription_id: int,
     os_name: str,
+    _: Callable[[str], str],
 ) -> None:
     link = await AppLinkRepository(session).get_by_os_name(os_name)
 
@@ -485,14 +500,14 @@ async def _device_os_screen(
     if not download_url and not guide_url:
         await safe_edit_message_text(
             target,
-            SCREEN3_EMPTY_TEXT,
+            _(SCREEN3_EMPTY_TEXT),
             reply_markup=device_os_keyboard(subscription_id, os_name),
         )
         return
 
     await safe_edit_message_text(
         target,
-        SCREEN3_WITH_LINKS_TEXT,
+        _(SCREEN3_WITH_LINKS_TEXT),
         reply_markup=device_os_keyboard(
             subscription_id,
             os_name,
@@ -519,6 +534,7 @@ async def _render_months_text(
     months: int,
     early: bool,
     user_balance: Decimal,
+    _: Callable[[str], str],
 ) -> str:
     basket = await PricingService.calculate_tariff_basket(
         session=session,
@@ -529,41 +545,47 @@ async def _render_months_text(
         device_mode=device_mode,
         device_count=device_count,
     )
-    action_label = 'Продление подписки' if early else 'Оформление подписки'
+    action_label = _('Продление подписки') if early else _('Оформление подписки')
 
     return (
         f'🌐 <b>{action_label}</b>\n\n'
-        f'Тариф: <b>{basket.plan.title}</b>\n'
-        f'Устройства: <b>{basket.device_label}</b>\n'
-        f'Срок: <b>{months} мес.</b>\n'
-        f'Месячная цена: <b>{basket.effective_monthly_price} ₽</b>\n'
-        f'Сумма без скидки: <b>{basket.subtotal} ₽</b>\n'
-        f'Скидка: <b>{basket.discount_percent}%</b>\n'
-        f'К оплате: <b>{basket.payable} ₽</b>'
+        + _('Тариф: <b>{value}</b>').format(value=basket.plan.title) + '\n'
+        + _('Устройства: <b>{value}</b>').format(value=basket.device_label) + '\n'
+        + _('Срок: <b>{months} мес.</b>').format(months=months) + '\n'
+        + _('Месячная цена: <b>{value} ₽</b>').format(value=basket.effective_monthly_price) + '\n'
+        + _('Сумма без скидки: <b>{value} ₽</b>').format(value=basket.subtotal) + '\n'
+        + _('Скидка: <b>{value}%</b>').format(value=basket.discount_percent) + '\n'
+        + _('К оплате: <b>{value} ₽</b>').format(value=basket.payable)
     )
 
 
-@router.message(F.text == '🎁 Тест на 24 часа')
-async def trial_from_main_menu(message: Message, session: AsyncSession, settings: Settings) -> None:
+@router.message(F.text.in_(all_translations(MAIN_MENU_TRIAL_BUTTON)))
+async def trial_from_main_menu(
+    message: Message,
+    session: AsyncSession,
+    settings: Settings,
+    _: Callable[[str], str],
+) -> None:
     user = await get_or_create_user(message, session)
     is_admin = await _is_admin_user(session, user.tg_id, settings)
 
     if user.trial_issued_at:
         await message.answer(
-            'Тест уже был использован ранее.',
-            reply_markup=main_menu(show_trial=False, show_admin=is_admin),
+            _('Тест уже был использован ранее.'),
+            reply_markup=main_menu(show_trial=False, show_admin=is_admin, translator=_),
         )
         return
 
     app_settings = await _load_app_settings(session)
     duration_text = _format_duration_text(effective_int_from_row(app_settings, 'trial_duration_days', settings.trial_duration_days, minimum=1))
-    traffic_text = f'{effective_int_from_row(app_settings, 'trial_traffic_gb', settings.trial_traffic_gb, minimum=0)} ГБ'
+    traffic_gb = effective_int_from_row(app_settings, 'trial_traffic_gb', settings.trial_traffic_gb, minimum=0)
+    traffic_text = _('{gb} ГБ').format(gb=traffic_gb)
     device_text = _format_device_label(effective_int_from_row(app_settings, 'trial_device_count', settings.trial_device_count, minimum=1))
 
     await message.answer(
-        '🎁 <b>Бесплатный тест</b>\n\n'
-        f'Вы получите доступ на {duration_text}, {traffic_text} трафика и {device_text}.\n'
-        'Хотите активировать?',
+        _('🎁 <b>Бесплатный тест</b>\n\nВы получите доступ на {duration}, {traffic} трафика и {devices}.\nХотите активировать?').format(
+            duration=duration_text, traffic=traffic_text, devices=device_text,
+        ),
         reply_markup=trial_confirm_keyboard(),
     )
 
@@ -575,6 +597,7 @@ async def take_trial(
     session: AsyncSession,
     settings: Settings,
     marzban: MarzbanClient,
+    _: Callable[[str], str],
 ) -> None:
     user = await get_or_create_user(callback, session)
     is_admin = await _is_admin_user(session, user.tg_id, settings)
@@ -582,8 +605,8 @@ async def take_trial(
     if callback_data.action == 'decline':
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer(
-            '👌 Хорошо, тест можно взять позже.',
-            reply_markup=main_menu(show_trial=not bool(user.trial_issued_at), show_admin=is_admin),
+            _('👌 Хорошо, тест можно взять позже.'),
+            reply_markup=main_menu(show_trial=not bool(user.trial_issued_at), show_admin=is_admin, translator=_),
         )
         await safe_callback_answer(callback)
         return
@@ -594,56 +617,75 @@ async def take_trial(
     except ValueError as exc:
         await callback.message.answer(
             str(exc),
-            reply_markup=main_menu(show_trial=not bool(user.trial_issued_at), show_admin=is_admin),
+            reply_markup=main_menu(show_trial=not bool(user.trial_issued_at), show_admin=is_admin, translator=_),
         )
         await safe_callback_answer(callback)
         return
     except MarzbanAPIError:
         await callback.message.answer(
-            '❌ Не удалось активировать тест из-за ошибки панели. Попробуйте позже.',
-            reply_markup=main_menu(show_trial=not bool(user.trial_issued_at), show_admin=is_admin),
+            _('❌ Не удалось активировать тест из-за ошибки панели. Попробуйте позже.'),
+            reply_markup=main_menu(show_trial=not bool(user.trial_issued_at), show_admin=is_admin, translator=_),
         )
         await safe_callback_answer(callback)
         return
 
     latest = await SubscriptionRepository(session).get_latest(user.id)
     await callback.message.answer(
-        '✅ Тестовая подписка активирована.',
+        _('✅ Тестовая подписка активирована.'),
         reply_markup=active_vpn_keyboard(subscription_id=latest.id if latest else 0),
     )
     await callback.message.answer(
-        '🏠 Главное меню обновлено.',
-        reply_markup=main_menu(show_trial=False, show_admin=is_admin),
+        _('🏠 Главное меню обновлено.'),
+        reply_markup=main_menu(show_trial=False, show_admin=is_admin, translator=_),
     )
     await safe_callback_answer(callback)
 
 
-@router.message(F.text == '👑 Мой VPN')
-async def my_vpn(message: Message, session: AsyncSession, settings: Settings, marzban: MarzbanClient) -> None:
+@router.message(F.text.in_(all_translations(MAIN_MENU_VPN_BUTTON)))
+async def my_vpn(
+    message: Message,
+    session: AsyncSession,
+    settings: Settings,
+    marzban: MarzbanClient,
+    _: Callable[[str], str],
+) -> None:
     user = await get_or_create_user(message, session)
     subs = await SubscriptionRepository(session).list_by_user_id(user.id)
     active_services = [(s.id, s.is_alive_local, s.service_id) for s in subs if s.is_alive_local]
     if active_services:
-        await message.answer('👑 <b>Мой VPN</b>\n\nВыберите услугу:', reply_markup=vpn_services_keyboard(active_services))
+        await message.answer(
+            _('👑 <b>Мой VPN</b>\n\nВыберите услугу:'),
+            reply_markup=vpn_services_keyboard(active_services),
+        )
         return
-    await message.answer('🌐 <b>Подключение VPN</b>\n\nВыберите режим устройств:', reply_markup=device_mode_keyboard())
+    await message.answer(
+        _('🌐 <b>Подключение VPN</b>\n\nВыберите режим устройств:'),
+        reply_markup=device_mode_keyboard(),
+    )
 
 
 @router.callback_query(VpnCallback.filter(F.action == 'services'))
-async def services_screen(callback: CallbackQuery, session: AsyncSession) -> None:
+async def services_screen(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    _: Callable[[str], str],
+) -> None:
     user = await get_or_create_user(callback, session)
-    await _services_screen(callback.message, session=session, user_id=user.id)
+    await _services_screen(callback.message, session=session, user_id=user.id, _=_)
     await safe_callback_answer(callback)
 
 
 @router.callback_query(VpnCallback.filter(F.action == 'buy_new'))
-async def open_new_purchase_flow(callback: CallbackQuery) -> None:
+async def open_new_purchase_flow(
+    callback: CallbackQuery,
+    _: Callable[[str], str],
+) -> None:
     changed = await safe_edit_message_text(
         callback.message,
-        _render_purchase_entry_text(),
+        _render_purchase_entry_text(_),
         reply_markup=device_mode_keyboard(),
     )
-    await safe_callback_answer(callback, 'Открываю оформление подписки' if changed else 'Это меню уже открыто')
+    await safe_callback_answer(callback, _('Открываю оформление подписки') if changed else _('Это меню уже открыто'))
 
 
 @router.callback_query(VpnCallback.filter(F.action.in_({'renew', 'renew_early'})))
@@ -651,15 +693,16 @@ async def open_tariffs_renew(
     callback: CallbackQuery,
     callback_data: VpnCallback,
     session: AsyncSession,
+    _: Callable[[str], str],
 ) -> None:
     user = await get_or_create_user(callback, session)
     subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
     if not subscription:
-        await safe_callback_answer(callback, 'Подписка не найдена', show_alert=True)
+        await safe_callback_answer(callback, _('Подписка не найдена'), show_alert=True)
         return
 
     if subscription.is_trial:
-        await safe_callback_answer(callback, 'Тестовую подписку нельзя продлить', show_alert=True)
+        await safe_callback_answer(callback, _('Тестовую подписку нельзя продлить'), show_alert=True)
         return
 
     early = callback_data.action == 'renew_early'
@@ -679,6 +722,7 @@ async def open_tariffs_renew(
                 months=1,
                 early=early,
                 user_balance=user.balance,
+                _=_,
             ),
             reply_markup=months_keyboard(
                 subscription.current_tariff_code,
@@ -691,12 +735,12 @@ async def open_tariffs_renew(
                 max_discount_percent=rules.max_discount_percent,
             ),
         )
-        await safe_callback_answer(callback, 'Выберите срок продления')
+        await safe_callback_answer(callback, _('Выберите срок продления'))
         return
 
     await safe_edit_message_text(
         callback.message,
-        '🌐 <b>Продление подписки</b>\n\nВыберите режим устройств:',
+        _('🌐 <b>Продление подписки</b>\n\nВыберите режим устройств:'),
         reply_markup=device_mode_keyboard(
             early=early,
             subscription_id=callback_data.subscription_id,
@@ -713,14 +757,15 @@ async def vpn_details(
     session: AsyncSession,
     settings: Settings,
     marzban: MarzbanClient,
+    _: Callable[[str], str],
 ) -> None:
     user = await get_or_create_user(callback, session)
     subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
     if not subscription:
-        await safe_callback_answer(callback, 'Подписка не найдена', show_alert=True)
+        await safe_callback_answer(callback, _('Подписка не найдена'), show_alert=True)
         return
 
-    await _details_screen(callback.message, session=session, settings=settings, marzban=marzban, subscription=subscription)
+    await _details_screen(callback.message, session=session, settings=settings, marzban=marzban, subscription=subscription, _=_)
     await safe_callback_answer(callback)
 
 
@@ -730,15 +775,16 @@ async def device_menu(
     callback_data: VpnCallback,
     session: AsyncSession,
     settings: Settings,
+    _: Callable[[str], str],
 ) -> None:
     user = await get_or_create_user(callback, session)
     subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
     if not subscription:
-        await safe_callback_answer(callback, 'Подписка не найдена', show_alert=True)
+        await safe_callback_answer(callback, _('Подписка не найдена'), show_alert=True)
         return
 
     setup_url = _build_setup_landing_url(settings, getattr(subscription, 'service_id', None))
-    await _device_menu_screen(callback.message, subscription.id, setup_landing_url=setup_url)
+    await _device_menu_screen(callback.message, subscription.id, setup_landing_url=setup_url, _=_)
     await safe_callback_answer(callback)
 
 
@@ -748,6 +794,7 @@ async def device_menu_back(
     callback_data: DeviceInfoCallback,
     session: AsyncSession,
     settings: Settings,
+    _: Callable[[str], str],
 ) -> None:
     user = await get_or_create_user(callback, session)
     subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
@@ -755,17 +802,23 @@ async def device_menu_back(
         settings,
         getattr(subscription, 'service_id', None) if subscription else None,
     )
-    await _device_menu_screen(callback.message, callback_data.subscription_id, setup_landing_url=setup_url)
+    await _device_menu_screen(callback.message, callback_data.subscription_id, setup_landing_url=setup_url, _=_)
     await safe_callback_answer(callback)
 
 
 @router.callback_query(DeviceInfoCallback.filter(F.action == 'os_info'))
-async def device_os_info(callback: CallbackQuery, callback_data: DeviceInfoCallback, session: AsyncSession) -> None:
+async def device_os_info(
+    callback: CallbackQuery,
+    callback_data: DeviceInfoCallback,
+    session: AsyncSession,
+    _: Callable[[str], str],
+) -> None:
     await _device_os_screen(
         callback.message,
         session=session,
         subscription_id=callback_data.subscription_id,
         os_name=callback_data.os_name,
+        _=_,
     )
     await safe_callback_answer(callback)
 
@@ -777,38 +830,39 @@ async def show_key(
     session: AsyncSession,
     marzban: MarzbanClient,
     settings: Settings,
+    _: Callable[[str], str],
 ) -> None:
     user = await get_or_create_user(callback, session)
     subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
     if not subscription:
-        await safe_callback_answer(callback, 'Подписка не найдена', show_alert=True)
+        await safe_callback_answer(callback, _('Подписка не найдена'), show_alert=True)
         return
 
     view = await _load_subscription_view(session, settings, marzban, subscription)
     sub_url = view['subscription_url']
     if not sub_url:
-        await safe_callback_answer(callback, 'Ссылка подписки отсутствует', show_alert=True)
+        await safe_callback_answer(callback, _('Ссылка подписки отсутствует'), show_alert=True)
         return
 
     app_settings = await _load_app_settings(session)
     qr = await build_qr_png(str(sub_url))
 
     caption = (
-        '🌐 Информация о вашей услуге следующая:\n'
-        f'🔎 Статус услуги: {view["status_label"]}\n'
-        f'Максимальное количество подключений: {view["online_limit_label"]}\n'
-        'Протокол: VLESS\n'
-        f'Номер услуги: {subscription.service_id}\n'
-        f'♾️ Предоставленный трафик: {view["provided_label"]}\n'
-        f'📅 Активен до: {format_dt(view["expire_dt"])}'
+        _('🌐 Информация о вашей услуге следующая:') + '\n'
+        + _('🔎 Статус услуги: {value}').format(value=view['status_label']) + '\n'
+        + _('Максимальное количество подключений: {value}').format(value=view['online_limit_label']) + '\n'
+        + _('Протокол: VLESS') + '\n'
+        + _('Номер услуги: {value}').format(value=subscription.service_id) + '\n'
+        + _('♾️ Предоставленный трафик: {value}').format(value=view['provided_label']) + '\n'
+        + _('📅 Активен до: {value}').format(value=format_dt(view['expire_dt']))
     )
 
     if subscription.is_trial:
-        caption += '\n🎁 Тестовая подписка: продление, сброс трафика и докупка недоступны.'
+        caption += '\n' + _('🎁 Тестовая подписка: продление, сброс трафика и докупка недоступны.')
     elif _is_unlimited_subscription(subscription):
-        caption += '\n♾️ Безлимитный тариф: докупка трафика недоступна.'
+        caption += '\n' + _('♾️ Безлимитный тариф: докупка трафика недоступна.')
     elif view['has_cycle_extra']:
-        caption += f'\n➕ Доп. трафик текущего цикла: +{view["cycle_extra_label"]}'
+        caption += '\n' + _('➕ Доп. трафик текущего цикла: +{value}').format(value=view['cycle_extra_label'])
 
     try:
         await callback.message.delete()
@@ -823,8 +877,8 @@ async def show_key(
 
     if effective_bool_from_row(app_settings, 'show_subscription_page_button', settings.show_subscription_page_button):
         await callback.message.answer(
-            '🌐 Откройте страницу вашей подписки по кнопке ниже:',
-            reply_markup=_subscription_link_keyboard(str(sub_url)),
+            _('🌐 Откройте страницу вашей подписки по кнопке ниже:'),
+            reply_markup=_subscription_link_keyboard(str(sub_url), _),
             disable_web_page_preview=True,
         )
 
@@ -837,6 +891,7 @@ async def back_from_key(
     callback_data: VpnCallback,
     session: AsyncSession,
     settings: Settings,
+    _: Callable[[str], str],
 ) -> None:
     try:
         await callback.message.delete()
@@ -850,39 +905,44 @@ async def back_from_key(
         getattr(subscription, 'service_id', None) if subscription else None,
     )
     await callback.message.answer(
-        SCREEN2_TEXT,
-        reply_markup=device_keyboard(callback_data.subscription_id, setup_landing_url=setup_url),
+        _(SCREEN2_TEXT),
+        reply_markup=device_keyboard(callback_data.subscription_id, setup_landing_url=setup_url, translator=_),
     )
     await safe_callback_answer(callback)
 
 
 @router.callback_query(VpnCallback.filter(F.action == 'topup'))
-async def topup_menu(callback: CallbackQuery, callback_data: VpnCallback, session: AsyncSession) -> None:
+async def topup_menu(
+    callback: CallbackQuery,
+    callback_data: VpnCallback,
+    session: AsyncSession,
+    _: Callable[[str], str],
+) -> None:
     user = await get_or_create_user(callback, session)
     subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
     if not subscription:
-        await safe_callback_answer(callback, 'Подписка не найдена', show_alert=True)
+        await safe_callback_answer(callback, _('Подписка не найдена'), show_alert=True)
         return
 
     if subscription.is_trial:
-        await safe_callback_answer(callback, 'Для тестовой подписки докупка трафика недоступна', show_alert=True)
+        await safe_callback_answer(callback, _('Для тестовой подписки докупка трафика недоступна'), show_alert=True)
         return
 
     if _is_unlimited_subscription(subscription):
-        await safe_callback_answer(callback, 'Для безлимитного тарифа докупка трафика не требуется и недоступна', show_alert=True)
+        await safe_callback_answer(callback, _('Для безлимитного тарифа докупка трафика не требуется и недоступна'), show_alert=True)
         return
 
     topups = await PricingService.list_topups(session)
     if not topups:
         await safe_callback_answer(
             callback,
-            'Сейчас нет доступных пакетов докупки трафика. Попробуйте позже.',
+            _('Сейчас нет доступных пакетов докупки трафика. Попробуйте позже.'),
             show_alert=True,
         )
         return
 
     await callback.message.answer(
-        'Выберите объем доп. трафика:',
+        _('Выберите объем доп. трафика:'),
         reply_markup=topup_keyboard(callback_data.subscription_id, topups),
     )
     await safe_callback_answer(callback)
@@ -895,15 +955,16 @@ async def show_reset_traffic_quote(
     session: AsyncSession,
     settings: Settings,
     marzban: MarzbanClient,
+    _: Callable[[str], str],
 ) -> None:
     user = await get_or_create_user(callback, session)
     subscription = await _load_subscription_for_user(session, user.id, callback_data.subscription_id)
     if not subscription:
-        await safe_callback_answer(callback, 'Подписка не найдена', show_alert=True)
+        await safe_callback_answer(callback, _('Подписка не найдена'), show_alert=True)
         return
 
     if subscription.is_trial:
-        await safe_callback_answer(callback, 'Для тестовой подписки сброс трафика недоступен', show_alert=True)
+        await safe_callback_answer(callback, _('Для тестовой подписки сброс трафика недоступен'), show_alert=True)
         return
 
     service = _service(session, settings, marzban)
@@ -915,10 +976,10 @@ async def show_reset_traffic_quote(
 
     await safe_edit_message_text(
         callback.message,
-        _render_reset_quote_text(subscription=subscription, quote=quote, balance=user.balance or Decimal('0.00')),
+        _render_reset_quote_text(subscription=subscription, quote=quote, balance=user.balance or Decimal('0.00'), _=_),
         reply_markup=_reset_traffic_quote_keyboard(subscription.id),
     )
-    await safe_callback_answer(callback, 'Проверьте стоимость и подтвердите сброс')
+    await safe_callback_answer(callback, _('Проверьте стоимость и подтвердите сброс'))
 
 
 @router.callback_query(VpnCallback.filter(F.action == 'reset_traffic_confirm'))
@@ -928,24 +989,25 @@ async def confirm_reset_traffic(
     session: AsyncSession,
     settings: Settings,
     marzban: MarzbanClient,
+    _: Callable[[str], str],
 ) -> None:
     current_user = await get_or_create_user(callback, session)
     locked_user = await UserRepository(session).get_by_id_for_update(current_user.id)
     subscription = await SubscriptionRepository(session).get_by_id_for_update(callback_data.subscription_id)
 
     if locked_user is None:
-        await safe_callback_answer(callback, 'Пользователь не найден', show_alert=True)
+        await safe_callback_answer(callback, _('Пользователь не найден'), show_alert=True)
         return
     if subscription is None or subscription.user_id != locked_user.id:
-        await safe_callback_answer(callback, 'Подписка не найдена', show_alert=True)
+        await safe_callback_answer(callback, _('Подписка не найдена'), show_alert=True)
         return
     if subscription.is_trial:
-        await safe_callback_answer(callback, 'Для тестовой подписки сброс трафика недоступен', show_alert=True)
+        await safe_callback_answer(callback, _('Для тестовой подписки сброс трафика недоступен'), show_alert=True)
         return
 
     service = _service(session, settings, marzban)
     try:
-        quote, _ = await service.reset_traffic_paid(locked_user, subscription)
+        quote, _reset_meta = await service.reset_traffic_paid(locked_user, subscription)
         await session.commit()
     except ValueError as exc:
         await session.rollback()
@@ -953,18 +1015,23 @@ async def confirm_reset_traffic(
         return
     except MarzbanAPIError:
         await session.rollback()
-        await safe_callback_answer(callback, 'Не удалось выполнить сброс через панель. Попробуйте позже.', show_alert=True)
+        await safe_callback_answer(callback, _('Не удалось выполнить сброс через панель. Попробуйте позже.'), show_alert=True)
         return
 
-    await _details_screen(callback.message, session=session, settings=settings, marzban=marzban, subscription=subscription)
-    await safe_callback_answer(callback, f'Трафик сброшен. Списано {quote.reset_price} ₽')
+    await _details_screen(callback.message, session=session, settings=settings, marzban=marzban, subscription=subscription, _=_)
+    await safe_callback_answer(callback, _('Трафик сброшен. Списано {value} ₽').format(value=quote.reset_price))
 
 
 @router.callback_query(VpnCallback.filter(F.action == 'back_main'))
-async def back_main(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+async def back_main(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    settings: Settings,
+    _: Callable[[str], str],
+) -> None:
     user = await get_or_create_user(callback, session)
-    await _services_screen(callback.message, session=session, user_id=user.id)
-    await safe_callback_answer(callback, 'Возвращаю к Мой VPN')
+    await _services_screen(callback.message, session=session, user_id=user.id, _=_)
+    await safe_callback_answer(callback, _('Возвращаю к Мой VPN'))
 
 
 _SNOOZE_TTL_SECONDS = 24 * 3600
@@ -976,16 +1043,17 @@ async def snooze_notification(
     callback_data: NotificationCallback,
     session: AsyncSession,
     cache: CacheService,
+    _: Callable[[str], str],
 ) -> None:
     user = await get_or_create_user(callback, session)
     code = (callback_data.code or '').strip()
     if not code:
-        await safe_callback_answer(callback, 'Не удалось понять, какое уведомление отключить.', show_alert=True)
+        await safe_callback_answer(callback, _('Не удалось понять, какое уведомление отключить.'), show_alert=True)
         return
 
     redis_client = getattr(cache, 'redis', None)
     if redis_client is None:
-        await safe_callback_answer(callback, 'Snooze временно недоступен. Попробуйте позже.', show_alert=True)
+        await safe_callback_answer(callback, _('Snooze временно недоступен. Попробуйте позже.'), show_alert=True)
         return
 
     key = NotificationDispatcher.snooze_key(
@@ -997,7 +1065,7 @@ async def snooze_notification(
         await redis_client.set(key, '1', ex=_SNOOZE_TTL_SECONDS)
     except Exception:
         logger.exception('Failed to set snooze key for user_id=%s code=%s', user.id, code)
-        await safe_callback_answer(callback, 'Не удалось включить snooze. Попробуйте позже.', show_alert=True)
+        await safe_callback_answer(callback, _('Не удалось включить snooze. Попробуйте позже.'), show_alert=True)
         return
 
-    await safe_callback_answer(callback, '🔕 Не буду напоминать 24 часа.')
+    await safe_callback_answer(callback, _('🔕 Не буду напоминать 24 часа.'))

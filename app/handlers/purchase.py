@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 import logging
 from decimal import Decimal, InvalidOperation, ROUND_UP
@@ -138,6 +139,7 @@ async def _return_to_subscription_details(
     settings: Settings,
     marzban: MarzbanClient,
     subscription_id: int,
+    _: Callable[[str], str] = lambda s: s,
 ) -> bool:
     if not subscription_id:
         return False
@@ -155,6 +157,7 @@ async def _return_to_subscription_details(
         settings=settings,
         marzban=marzban,
         subscription=subscription,
+        _=_,
     )
     return True
 
