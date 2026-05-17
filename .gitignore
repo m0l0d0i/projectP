@@ -40,3 +40,7 @@ data/
 *.swp
 *.swo
 .DS_Store
+
+# i18n: .pot template регенерируется через `pybabel extract` — не коммитим.
+# .po и .mo коммитим (см. docs/i18n.md).
+locale/messages.pot
