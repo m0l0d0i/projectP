@@ -25,7 +25,7 @@ from urllib.parse import quote_plus, urlparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -3861,6 +3861,60 @@ async def admin_trial_update(
         )
 
     return _redirect_with_message('/admin/trial/', success='Trial-настройки обновлены')
+
+
+@router.post('/admin/trial/force-reissue-all', dependencies=[Depends(require_superadmin)])
+async def admin_trial_force_reissue_all(request: Request):
+    """Сбрасывает `trial_issued_at = NULL` для всех active-юзеров
+    (FEA-ADMIN-CRUD-EXPAND). Не трогает существующие подписки.
+
+    После этого пользователь снова сможет получить trial через бот.
+    Active = `bot_blocked=False AND is_blocked=False`. Пользователи,
+    у которых `trial_issued_at` уже NULL, не считаются (count показывает
+    реально сброшенные).
+
+    Реализовано через bulk-UPDATE (один SQL-запрос вместо N+1
+    `reset_trial(user)`). Один audit-лог `admin_action` на всю операцию
+    с `details.action='trial_reset_bulk_all_active'`, count и cutoff_filter.
+    """
+    sessionmaker = request.app.state.sessionmaker
+
+    async with sessionmaker.begin() as session:
+        result = await session.execute(
+            sa_update(User)
+            .where(
+                User.bot_blocked.is_(False),
+                User.is_blocked.is_(False),
+                User.trial_issued_at.is_not(None),
+            )
+            .values(trial_issued_at=None)
+            .execution_options(synchronize_session=False)
+        )
+        affected = int(result.rowcount or 0)
+
+        await AuditLogRepository(session).create(
+            action=AuditAction.admin_action,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            entity_type='user',
+            entity_id='bulk',
+            details={
+                'action': 'trial_reset_bulk_all_active',
+                'affected_users': affected,
+                'cutoff_filter': 'bot_blocked=False AND is_blocked=False AND trial_issued_at IS NOT NULL',
+            },
+        )
+
+    if affected == 0:
+        return _redirect_with_message(
+            '/admin/trial/',
+            success='У всех active-пользователей trial_issued_at и так пуст — нечего сбрасывать',
+        )
+    return _redirect_with_message(
+        '/admin/trial/',
+        success=f'Сброшено trial_issued_at для {affected} active-пользователей. Они снова смогут получить trial через бот.',
+    )
+
 
 @router.get('/admin/antispam/', response_class=HTMLResponse, dependencies=[Depends(require_any)])
 async def admin_antispam(request: Request):

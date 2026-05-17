@@ -202,5 +202,36 @@
       </div>
     </div>
   </div>
+
+  <div class="rounded-3xl border border-amber-500/30 bg-amber-500/5 p-6 shadow-xl">
+    <h2 class="flex items-center gap-2 text-xl font-semibold text-white">
+      <span>⚠️ Принудительный сброс trial для всех active-юзеров</span>
+      <span
+        class="help-dot"
+        tabindex="0"
+        data-tooltip="Опасная операция: обнуляет users.trial_issued_at для всех пользователей, которые не заблокированы (bot_blocked=false AND is_blocked=false). После этого они снова смогут получить trial через бот. Существующие подписки не трогаются. Используйте, например, при крупном промо или при глобальном восстановлении после сбоя выдачи."
+      >?</span>
+    </h2>
+    <p class="mt-2 text-sm leading-6 text-slate-300">
+      Эта операция <span class="font-semibold text-white">обнуляет</span>
+      <code class="rounded bg-slate-900 px-1 py-0.5 text-slate-200">users.trial_issued_at</code>
+      для всех active-юзеров (не заблокированы, не bot_blocked). Существующие подписки не трогаются —
+      просто пользователь снова сможет нажать «Получить trial» в боте.
+    </p>
+    <p class="mt-2 text-xs text-slate-500">
+      Реализовано через один SQL <code class="rounded bg-slate-900 px-1 py-0.5">UPDATE</code>,
+      audit пишется единой строкой с total count. Roll-back возможен только через DB-restore.
+    </p>
+
+    <form method="post" action="/admin/trial/force-reissue-all" class="mt-4" data-confirm="Действительно обнулить trial_issued_at у ВСЕХ active-пользователей? Откатить можно только через restore.">
+      <button
+        type="submit"
+        class="inline-flex items-center justify-center rounded-2xl bg-rose-500 px-5 py-3 text-sm font-semibold text-white hover:bg-rose-400"
+        title="Bulk UPDATE: users.trial_issued_at = NULL WHERE bot_blocked=false AND is_blocked=false AND trial_issued_at IS NOT NULL"
+      >
+        Сбросить trial_issued_at для всех active-юзеров
+      </button>
+    </form>
+  </div>
 </div>
 {% endblock %}
