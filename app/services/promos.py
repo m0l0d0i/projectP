@@ -152,6 +152,7 @@ class PromoService:
         expires_at: datetime | None,
         is_active: bool,
         created_by_tg_id: int | None,
+        unlocks_tariff_id: int | None,
     ) -> PromoCode:
         if requested_code:
             await self._ensure_unique_code(requested_code)
@@ -161,6 +162,7 @@ class PromoService:
                 max_uses=max_uses,
                 expires_at=expires_at,
                 created_by_tg_id=created_by_tg_id,
+                unlocks_tariff_id=unlocks_tariff_id,
             )
             if promo.is_active != is_active:
                 await self.promos.set_active(promo, is_active)
@@ -176,6 +178,7 @@ class PromoService:
                 max_uses=max_uses,
                 expires_at=expires_at,
                 created_by_tg_id=created_by_tg_id,
+                unlocks_tariff_id=unlocks_tariff_id,
             )
             if promo.is_active != is_active:
                 await self.promos.set_active(promo, is_active)
@@ -257,6 +260,18 @@ class PromoService:
         await self.session.flush()
         return True, f'✅ Промокод применён. Баланс пополнен.{unlock_message}'
 
+    @staticmethod
+    def _normalize_unlocks_tariff_id(value: int | str | None) -> int | None:
+        if value in (None, '', 0, '0'):
+            return None
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Идентификатор тарифа должен быть целым числом.') from exc
+        if normalized < 1:
+            return None
+        return normalized
+
     async def create_promo(
         self,
         *,
@@ -267,6 +282,7 @@ class PromoService:
         expires_at: datetime | None = None,
         is_active: bool = True,
         created_by_tg_id: int | None,
+        unlocks_tariff_id: int | str | None = None,
     ) -> PromoCode:
         final_code = self._normalize_code(code) or None
         normalized_bonus_amount = self._normalize_bonus_amount(bonus_amount)
@@ -275,6 +291,7 @@ class PromoService:
             expires_at=expires_at,
             duration_minutes=duration_minutes,
         )
+        normalized_unlocks_tariff_id = self._normalize_unlocks_tariff_id(unlocks_tariff_id)
 
         promo = await self._create_with_unique_code(
             requested_code=final_code,
@@ -283,6 +300,7 @@ class PromoService:
             expires_at=normalized_expires_at,
             is_active=bool(is_active),
             created_by_tg_id=created_by_tg_id,
+            unlocks_tariff_id=normalized_unlocks_tariff_id,
         )
         await self.session.flush()
         return promo
@@ -296,6 +314,7 @@ class PromoService:
         max_uses: int | str | None,
         expires_at: datetime | None,
         is_active: bool,
+        unlocks_tariff_id: int | str | None = None,
     ) -> PromoCode:
         promo = await self._get_by_id_for_update(promo_id)
         if promo is None:
@@ -312,6 +331,7 @@ class PromoService:
             expires_at=expires_at,
             duration_minutes=None,
         )
+        normalized_unlocks_tariff_id = self._normalize_unlocks_tariff_id(unlocks_tariff_id)
 
         repo_update = getattr(self.promos, 'update', None)
         if callable(repo_update):
@@ -322,6 +342,7 @@ class PromoService:
                 max_uses=normalized_max_uses,
                 expires_at=normalized_expires_at,
                 is_active=bool(is_active),
+                unlocks_tariff_id=normalized_unlocks_tariff_id,
             )
         else:
             promo.code = normalized_code
@@ -329,6 +350,7 @@ class PromoService:
             promo.max_uses = normalized_max_uses
             promo.expires_at = normalized_expires_at
             promo.is_active = bool(is_active)
+            promo.unlocks_tariff_id = normalized_unlocks_tariff_id
             await self.session.flush()
 
         return promo

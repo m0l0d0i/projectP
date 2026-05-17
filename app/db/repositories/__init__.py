@@ -2003,6 +2003,9 @@ class ReferralRepository:
         return int(res.scalar_one()) > 0
 
 
+_PROMO_UNSET = object()
+
+
 class PromoRepository:
     STATUS_ALL = 'all'
     STATUS_ACTIVE = 'active'
@@ -2120,6 +2123,18 @@ class PromoRepository:
         res = await self.session.execute(stmt)
         return int(res.scalar_one())
 
+    @staticmethod
+    def _normalize_unlocks_tariff_id(value: int | str | None) -> int | None:
+        if value in (None, '', 0, '0'):
+            return None
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('unlocks_tariff_id должен быть целым числом.') from exc
+        if normalized < 1:
+            return None
+        return normalized
+
     async def create(
         self,
         *,
@@ -2128,6 +2143,7 @@ class PromoRepository:
         max_uses: int | None,
         expires_at: datetime | None,
         created_by_tg_id: int | None,
+        unlocks_tariff_id: int | None = None,
     ) -> PromoCode:
         normalized_code = self._normalize_code(code)
         if not normalized_code:
@@ -2143,6 +2159,7 @@ class PromoRepository:
             expires_at=_normalize_utc_datetime(expires_at),
             is_active=True,
             created_by_tg_id=created_by_tg_id,
+            unlocks_tariff_id=self._normalize_unlocks_tariff_id(unlocks_tariff_id),
         )
         self.session.add(promo)
         await self.session.flush()
@@ -2157,6 +2174,7 @@ class PromoRepository:
         max_uses: int | None,
         expires_at: datetime | None,
         is_active: bool | None = None,
+        unlocks_tariff_id: int | None | object = _PROMO_UNSET,
     ) -> PromoCode:
         normalized_code = self._normalize_code(code)
         if not normalized_code:
@@ -2172,6 +2190,8 @@ class PromoRepository:
         promo.expires_at = _normalize_utc_datetime(expires_at)
         if is_active is not None:
             promo.is_active = bool(is_active)
+        if unlocks_tariff_id is not _PROMO_UNSET:
+            promo.unlocks_tariff_id = self._normalize_unlocks_tariff_id(unlocks_tariff_id)
         await self.session.flush()
         return promo
 

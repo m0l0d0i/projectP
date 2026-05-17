@@ -210,6 +210,37 @@
         </div>
 
         <div class="md:col-span-2">
+          <label class="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <span>Разблокирует тариф</span>
+            <span
+              class="help-dot"
+              tabindex="0"
+              data-tooltip="Опционально. Если задан тариф, при погашении промокода ID тарифа добавляется в users.unlocked_tariff_ids — это открывает доступ к code_only / private_link тарифам (FEA-ADMIN-TARIFF-PLUS)."
+              aria-label="Подсказка по разблокировке тарифа промокодом"
+            >?</span>
+          </label>
+          <select
+            name="unlocks_tariff_id"
+            class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+          >
+            <option value="">Не привязан (баланс-only промокод)</option>
+            {% for plan in (tariff_options or []) %}
+              <option
+                value="{{ plan.id }}"
+                {% if edit_form and edit_form.unlocks_tariff_id == plan.id %}selected{% endif %}
+              >
+                #{{ plan.id }} · {{ plan.code }} — {{ plan.title }}{% if plan.is_archived %} [архив]{% elif not plan.is_active %} [неактивен]{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <p class="mt-2 text-xs text-slate-500">
+            Привязка открывает доступ к тарифам с <code class="rounded bg-slate-900 px-1 py-0.5 text-slate-200">visibility = code_only / private_link</code>
+            (см. <code class="rounded bg-slate-900 px-1 py-0.5 text-slate-200">/admin/pricing/</code>).
+            Архивные/неактивные тарифы доступны для выбора, чтобы сохранять привязку при временной деактивации.
+          </p>
+        </div>
+
+        <div class="md:col-span-2">
           <label class="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -364,6 +395,11 @@
               <div class="mt-1 text-xs text-slate-500">Создан: {{ row.created_at.strftime("%Y-%m-%d %H:%M UTC") }}</div>
               {% else %}
               <div class="mt-1 text-xs text-slate-500">Дата создания не указана</div>
+              {% endif %}
+              {% if row.unlocks_tariff_id %}
+              <div class="mt-2 inline-flex items-center rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 px-2 py-1 text-xs font-semibold text-fuchsia-200" title="Промокод разблокирует тариф id={{ row.unlocks_tariff_id }} в users.unlocked_tariff_ids при погашении">
+                🔓 разблокирует тариф #{{ row.unlocks_tariff_id }}
+              </div>
               {% endif %}
             </td>
             <td class="px-6 py-4 text-sm text-slate-300">{{ row.bonus_amount }} ₽</td>

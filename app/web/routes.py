@@ -1364,6 +1364,7 @@ def _promo_snapshot_for_audit(promo) -> dict[str, object]:
         'expires_at': getattr(promo, 'expires_at', None).isoformat() if getattr(promo, 'expires_at', None) else None,
         'is_active': bool(getattr(promo, 'is_active', False)),
         'admin_status': status,
+        'unlocks_tariff_id': getattr(promo, 'unlocks_tariff_id', None),
     }
 
 
@@ -1439,6 +1440,7 @@ def _promo_edit_form_defaults(promo) -> dict[str, object]:
         'max_uses': getattr(promo, 'max_uses', None),
         'expires_at': _datetime_local_input_value(getattr(promo, 'expires_at', None)),
         'is_active': bool(getattr(promo, 'is_active', False)),
+        'unlocks_tariff_id': getattr(promo, 'unlocks_tariff_id', None),
     }
 
 
@@ -6902,6 +6904,10 @@ async def admin_promocodes(
         total = await _promo_count_filtered(repo, status_filter=status_filter, query=search_query)
         counts = await _promo_summary_counts(repo)
         edit_promo = await repo.get_by_id(parsed_edit_id) if parsed_edit_id is not None else None
+        # FEA-ADMIN-CRUD-EXPAND: список тарифов для select'а `unlocks_tariff_id`
+        # в форме промокода. Берём list_all() — админ должен видеть в т.ч.
+        # архивные тарифы, чтобы не «терять» привязку при архивации тарифа.
+        tariff_options = await TariffRepository(session).list_all()
 
     promo_rows = []
     for promo in promos:
@@ -6924,6 +6930,7 @@ async def admin_promocodes(
                 can_delete=used_count == 0,
                 is_exhausted=admin_status == 'exhausted',
                 is_expired=admin_status == 'expired',
+                unlocks_tariff_id=getattr(promo, 'unlocks_tariff_id', None),
             )
         )
 
@@ -6956,6 +6963,16 @@ async def admin_promocodes(
             'counts': counts,
             'edit_promo': edit_promo,
             'edit_form': edit_form,
+            'tariff_options': [
+                SimpleNamespace(
+                    id=getattr(plan, 'id', None),
+                    code=getattr(plan, 'code', '') or '',
+                    title=getattr(plan, 'title', '') or getattr(plan, 'code', '') or f'#{getattr(plan, "id", "?")}',
+                    is_active=bool(getattr(plan, 'is_active', False)),
+                    is_archived=bool(getattr(plan, 'is_archived', False)),
+                )
+                for plan in tariff_options
+            ],
         },
     )
 
@@ -6970,6 +6987,7 @@ async def admin_promocodes_update(
     expires_at: str | None = Form(default=None),
     promo_id: int | None = Form(default=None),
     is_active: bool = Form(default=False),
+    unlocks_tariff_id: str | None = Form(default=None),
 ):
     sessionmaker = request.app.state.sessionmaker
 
@@ -6994,6 +7012,7 @@ async def admin_promocodes_update(
                     expires_at=_parse_datetime_local(expires_at),
                     is_active=is_active,
                     created_by_tg_id=None,
+                    unlocks_tariff_id=unlocks_tariff_id,
                 )
 
                 await audit_repo.create(
@@ -7030,6 +7049,7 @@ async def admin_promocodes_update(
                     max_uses=_coerce_optional_form_int(max_uses, field_label='Максимум использований'),
                     expires_at=_parse_datetime_local(expires_at),
                     is_active=is_active,
+                    unlocks_tariff_id=unlocks_tariff_id,
                 )
                 await audit_repo.create(
                     action=AuditAction.admin_action,
