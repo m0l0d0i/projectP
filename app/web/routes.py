@@ -5422,6 +5422,101 @@ async def admin_ticket_remove_tag(
     return _redirect_with_message(redirect, success=f'Тег «{tag.strip().lower()}» удалён')
 
 
+@router.post('/admin/tickets/bulk-close', dependencies=[Depends(require_support)])
+async def admin_tickets_bulk_close(
+    request: Request,
+    ticket_ids: list[int] = Form(default=[]),
+    close_reason: str | None = Form(default=None),
+):
+    """Массовое закрытие тикетов (FEA-ADMIN-CRUD-EXPAND).
+
+    Принимает список `ticket_ids` (checkboxes из /admin/tickets/) и общий
+    `close_reason` (опционально). Открытые тикеты закрываются по очереди
+    в одной транзакции; уже закрытые — пропускаются (закрытие idempotent).
+    Уведомления пользователям отправляются после коммита (best-effort через
+    outbox). Аудит — отдельная `ticket_closed`-запись на каждый тикет с
+    `bulk=True` в details.
+    """
+    sessionmaker = request.app.state.sessionmaker
+    normalized_close_reason = _normalized_optional_form_text(close_reason)
+
+    # dedup + skip non-positive
+    unique_ids: list[int] = []
+    seen: set[int] = set()
+    for raw_id in ticket_ids or []:
+        try:
+            tid = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if tid < 1 or tid in seen:
+            continue
+        seen.add(tid)
+        unique_ids.append(tid)
+
+    if not unique_ids:
+        return _redirect_with_message('/admin/tickets/', error='Не выбрано ни одного тикета')
+
+    closed_user_ids: list[tuple[int, int]] = []  # (ticket_id, user_id)
+    already_closed: list[int] = []
+    not_found: list[int] = []
+
+    async with sessionmaker.begin() as session:
+        repo = SupportTicketRepository(session)
+        audit_repo = AuditLogRepository(session)
+        for ticket_id in unique_ids:
+            ticket = await repo.get_by_id_for_update(ticket_id)
+            if ticket is None:
+                not_found.append(ticket_id)
+                continue
+
+            previous_status = getattr(ticket.status, 'value', ticket.status)
+            closed_now = await repo.close(
+                ticket,
+                reason=normalized_close_reason,
+                closed_by_admin_tg_id=None,
+                actor_type='admin',
+                actor_tg_id=None,
+            )
+            if not closed_now:
+                already_closed.append(ticket_id)
+                continue
+
+            closed_user_ids.append((ticket_id, ticket.user_id))
+            await audit_repo.create(
+                action=AuditAction.ticket_closed,
+                actor_type=AuditActorType.admin,
+                actor_tg_id=None,
+                entity_type='support_ticket',
+                entity_id=str(ticket.id),
+                details={
+                    'reason': normalized_close_reason,
+                    'closed_via': 'web_admin_bulk',
+                    'previous_status': previous_status,
+                    'new_status': getattr(ticket.status, 'value', ticket.status),
+                    'bulk': True,
+                    'bulk_batch_size': len(unique_ids),
+                },
+            )
+
+    for ticket_id, user_id in closed_user_ids:
+        with suppress(Exception):
+            await _notify_ticket_closed_from_web_admin(request, ticket_id=ticket_id, user_id=user_id)
+
+    closed_count = len(closed_user_ids)
+    parts: list[str] = []
+    if closed_count:
+        parts.append(f'закрыто {closed_count}')
+    if already_closed:
+        parts.append(f'уже было закрыто {len(already_closed)}')
+    if not_found:
+        parts.append(f'не найдено {len(not_found)}')
+    summary = 'Массовое закрытие: ' + (', '.join(parts) if parts else 'ничего не сделано')
+
+    if closed_count == 0 and not already_closed and not_found:
+        return _redirect_with_message('/admin/tickets/', error=summary)
+    return _redirect_with_message('/admin/tickets/', success=summary)
+
+
 @router.post('/admin/tickets/{ticket_id}/close', dependencies=[Depends(require_support)])
 async def admin_ticket_close(
     request: Request,
