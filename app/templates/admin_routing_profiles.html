@@ -465,11 +465,40 @@
     </div>
 
     {% if rows %}
-      <div class="mt-5 overflow-hidden rounded-2xl border border-slate-800">
+      <form method="post" action="/admin/routing-profiles/" class="mt-5 overflow-hidden rounded-2xl border border-slate-800">
+        <input type="hidden" name="action" value="bulk_toggle">
+        <div class="flex flex-col gap-3 border-b border-slate-800 bg-slate-950/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="text-xs text-slate-400">
+            Bulk-toggle для отмеченных:
+            <span class="help-dot" data-tooltip="Поставьте флажок у нужных профилей и нажмите «Включить» или «Выключить отмеченные». Default-профиль не выключается через bulk — на уровне backend такие записи пропускаются.">?</span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              name="bulk_target_state"
+              value="enable"
+              class="inline-flex items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
+              title="Включить is_enabled для всех отмеченных routing-profile (без изменения config_json)"
+            >
+              ✓ Включить отмеченные
+            </button>
+            <button
+              type="submit"
+              name="bulk_target_state"
+              value="disable"
+              class="inline-flex items-center justify-center rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/20"
+              title="Выключить is_enabled для отмеченных. Default-профиль из выборки исключается на backend, чтобы routing не развалился."
+              data-confirm="Выключить все отмеченные routing-profile? (default-профиль не будет затронут)"
+            >
+              ✕ Выключить отмеченные
+            </button>
+          </div>
+        </div>
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-slate-800 text-sm">
             <thead class="bg-slate-950/80">
               <tr class="text-left text-slate-400">
+                <th class="px-4 py-3 font-medium"><span class="sr-only">Bulk</span></th>
                 <th class="px-4 py-3 font-medium">Профиль</th>
                 <th class="px-4 py-3 font-medium">Runtime</th>
                 <th class="px-4 py-3 font-medium">Теги совпадения</th>
@@ -492,6 +521,18 @@
                 {% set preferred_tags = row.preferred_tags if row.preferred_tags is defined else [] %}
                 {% set has_xray_fragment = row.has_xray_fragment if row.has_xray_fragment is defined else False %}
                 <tr>
+                  <td class="px-4 py-4 align-top">
+                    <input
+                      type="checkbox"
+                      name="profile_ids"
+                      value="{{ profile_id }}"
+                      class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-500 focus:ring-cyan-400"
+                      aria-label="Выбрать routing-profile #{{ profile_id }} для bulk-toggle"
+                    >
+                    {% if is_default %}
+                    <div class="mt-1 text-[10px] text-cyan-400" title="Default-профиль исключается из bulk-disable на backend">default</div>
+                    {% endif %}
+                  </td>
                   <td class="px-4 py-4 align-top">
                     <div class="flex flex-wrap items-center gap-2">
                       <div class="font-semibold text-white">{{ title }}</div>
@@ -552,6 +593,14 @@
                         </button>
                       </form>
 
+                      <form method="post" action="/admin/routing-profiles/">
+                        <input type="hidden" name="action" value="copy" />
+                        <input type="hidden" name="profile_id" value="{{ profile_id }}" />
+                        <button type="submit" title="Создать копию профиля с code={{ code }}-copy. Копия создаётся выключенной и не-default — отредактируйте и включите явно." class="inline-flex items-center justify-center rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-200 hover:bg-fuchsia-500/20">
+                          📋 Копировать
+                        </button>
+                      </form>
+
                       <form method="post" action="/admin/routing-profiles/" data-confirm="Удалить профиль маршрутизации {{ code }}?">
                         <input type="hidden" name="action" value="delete" />
                         <input type="hidden" name="profile_id" value="{{ profile_id }}" />
@@ -566,7 +615,7 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </form>
     {% else %}
       <div class="mt-5 rounded-2xl border border-dashed border-slate-700 bg-slate-950/40 px-4 py-8 text-center text-sm text-slate-400">
         Профили маршрутизации пока не созданы.

@@ -8415,6 +8415,8 @@ async def admin_routing_profiles_update(
     notes: str | None = Form(default=None),
     is_enabled: bool = Form(default=False),
     is_default: bool = Form(default=False),
+    profile_ids: list[int] = Form(default=[]),
+    bulk_target_state: str | None = Form(default=None),
 ):
     normalized_action = (action or '').strip().lower()
     if not normalized_action:
@@ -8521,6 +8523,117 @@ async def admin_routing_profiles_update(
                     details={'action': 'delete', 'before': snapshot},
                 )
                 return _redirect_with_message('/admin/routing-profiles/', success='Routing profile удален')
+
+            if normalized_action == 'copy':
+                # FEA-ADMIN-CRUD-EXPAND: копия routing-profile.
+                # Безопасно: новый profile создаётся `is_enabled=False`,
+                # `is_default=False`. Чтобы включить — отдельным редактированием.
+                if profile_id is None:
+                    return _redirect_with_message('/admin/routing-profiles/', error='profile_id не указан')
+                src = await service.get_by_id(profile_id)
+                if src is None:
+                    return _redirect_with_message('/admin/routing-profiles/', error='Исходный routing profile не найден')
+
+                base_code = (src.code or '').strip().lower() or f'profile-{src.id}'
+                new_code = f'{base_code}-copy'
+                if await service.get_by_code(new_code) is not None:
+                    for suffix in range(2, 100):
+                        candidate = f'{base_code}-copy-{suffix}'
+                        if await service.get_by_code(candidate) is None:
+                            new_code = candidate
+                            break
+                    else:
+                        return _redirect_with_message('/admin/routing-profiles/', error='Не удалось подобрать уникальный code для копии')
+
+                src_title = (src.title or src.code or '').strip()
+                copy_row = await service.create(
+                    code=new_code,
+                    title=f'{src_title} (копия)' if src_title else f'Копия {new_code}',
+                    description=src.description,
+                    is_enabled=False,
+                    is_default=False,
+                    sort_order=int(src.sort_order or 100),
+                    match_tags=list(src.match_tags or []),
+                    config_json=dict(src.config_json or {}),
+                    notes=src.notes,
+                )
+                await audit_repo.create(
+                    action=AuditAction.routing_profile_updated,
+                    actor_type=AuditActorType.admin,
+                    actor_tg_id=None,
+                    entity_type='routing_profile',
+                    entity_id=str(copy_row.id),
+                    details={
+                        'action': 'copy',
+                        'source_profile_id': src.id,
+                        'source_code': src.code,
+                        'new_code': copy_row.code,
+                    },
+                )
+                return _redirect_with_message(
+                    f'/admin/routing-profiles/?edit_id={copy_row.id}',
+                    success=f'Создана копия: {copy_row.code} (выключена, отредактируйте и включите явно)',
+                )
+
+            if normalized_action == 'bulk_toggle':
+                # bulk enable/disable. Default-profile исключаем из disable
+                # (он должен оставаться включённым, иначе routing развалится).
+                normalized_target = (bulk_target_state or '').strip().lower()
+                if normalized_target not in {'enable', 'disable'}:
+                    return _redirect_with_message('/admin/routing-profiles/', error='bulk_target_state должен быть enable|disable')
+
+                unique_ids: list[int] = []
+                seen: set[int] = set()
+                for raw_id in profile_ids or []:
+                    try:
+                        pid = int(raw_id)
+                    except (TypeError, ValueError):
+                        continue
+                    if pid < 1 or pid in seen:
+                        continue
+                    seen.add(pid)
+                    unique_ids.append(pid)
+
+                if not unique_ids:
+                    return _redirect_with_message('/admin/routing-profiles/', error='Не выбрано ни одного routing-profile')
+
+                target_state = normalized_target == 'enable'
+                changed: list[int] = []
+                skipped_default: list[int] = []
+                not_found: list[int] = []
+                for pid in unique_ids:
+                    row = await service.get_by_id_for_update(pid)
+                    if row is None:
+                        not_found.append(pid)
+                        continue
+                    if not target_state and bool(getattr(row, 'is_default', False)):
+                        skipped_default.append(pid)
+                        continue
+                    if bool(row.is_enabled) == target_state:
+                        continue
+                    await service.update(row, is_enabled=target_state)
+                    changed.append(pid)
+                    await audit_repo.create(
+                        action=AuditAction.routing_profile_updated,
+                        actor_type=AuditActorType.admin,
+                        actor_tg_id=None,
+                        entity_type='routing_profile',
+                        entity_id=str(pid),
+                        details={
+                            'action': 'bulk_toggle',
+                            'target_state': normalized_target,
+                            'bulk': True,
+                            'bulk_batch_size': len(unique_ids),
+                        },
+                    )
+
+                parts: list[str] = []
+                parts.append(f'{"включено" if target_state else "выключено"} {len(changed)}')
+                if skipped_default:
+                    parts.append(f'пропущен default ({len(skipped_default)})')
+                if not_found:
+                    parts.append(f'не найдено {len(not_found)}')
+                return _redirect_with_message('/admin/routing-profiles/', success='Bulk-toggle: ' + ', '.join(parts))
     except (ValueError, RoutingProfileValidationError) as exc:
         return _redirect_with_message('/admin/routing-profiles/', error=str(exc))
     except Exception as exc:
