@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timezone
 
@@ -23,6 +24,7 @@ from app.db.repositories import (
     UserRepository,
 )
 from app.handlers.common import get_or_create_user
+from app.i18n import all_translations
 from app.keyboards.inline import (
     SupportTicketCallback,
     support_admin_history_keyboard,
@@ -639,12 +641,16 @@ async def support_noop(callback: CallbackQuery) -> None:
     await safe_callback_answer(callback)
 
 
-@router.message(F.text == '📞 Поддержка')
-async def support_home(message: Message, session: AsyncSession) -> None:
+@router.message(F.text.in_(all_translations('📞 Поддержка')))
+async def support_home(
+    message: Message,
+    session: AsyncSession,
+    _: Callable[[str], str] = lambda s: s,
+) -> None:
     user = await get_or_create_user(message, session)
     tickets = await SupportTicketRepository(session).list_by_user(user.id)
     ids = [t.id for t in tickets]
-    await message.answer('📬 <b>Ваши обращения в поддержку:</b>', reply_markup=support_list_keyboard(ids, page=0))
+    await message.answer(_('📬 <b>Ваши обращения в поддержку:</b>'), reply_markup=support_list_keyboard(ids, page=0))
 
 
 @router.callback_query(SupportTicketCallback.filter(F.action == 'page'))
@@ -657,10 +663,14 @@ async def support_page(callback: CallbackQuery, callback_data: SupportTicketCall
 
 
 @router.callback_query(SupportTicketCallback.filter(F.action == 'new'))
-async def support_new(callback: CallbackQuery, state: FSMContext) -> None:
+async def support_new(
+    callback: CallbackQuery,
+    state: FSMContext,
+    _: Callable[[str], str],
+) -> None:
     await state.set_state(SupportState.waiting_new_message)
     await state.update_data(ticket_id=0)
-    await callback.message.answer('📩 Введите ваше обращение. Можно отправить текст, фото, видео, документ или голосовое сообщение.')
+    await callback.message.answer(_('📩 Введите ваше обращение. Можно отправить текст, фото, видео, документ или голосовое сообщение.'))
     await safe_callback_answer(callback)
 
 
@@ -711,13 +721,17 @@ async def support_history_page(callback: CallbackQuery, callback_data: SupportTi
 
 
 @router.callback_query(SupportTicketCallback.filter(F.action == 'back'))
-async def support_back_to_list(callback: CallbackQuery, session: AsyncSession) -> None:
+async def support_back_to_list(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    _: Callable[[str], str],
+) -> None:
     user = await get_or_create_user(callback, session)
     tickets = await SupportTicketRepository(session).list_by_user(user.id)
     ids = [t.id for t in tickets]
     await safe_edit_message_text(
         callback.message,
-        '📬 <b>Ваши обращения в поддержку:</b>',
+        _('📬 <b>Ваши обращения в поддержку:</b>'),
         reply_markup=support_list_keyboard(ids, page=0),
     )
     await safe_callback_answer(callback)
