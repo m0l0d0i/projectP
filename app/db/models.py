@@ -150,6 +150,24 @@ class NodeSyncState(str, enum.Enum):
     error = 'error'
 
 
+class NodeHealthProbeStatus(str, enum.Enum):
+    """Результат единичного health-probe ноды (FEA-ADMIN-NODE-MONITOR).
+
+    Отделена от `NodeHealthStatus` сознательно: `NodeHealthStatus` —
+    текущее «вердиктное» состояние ноды в роутинге (агрегат), а
+    `NodeHealthProbeStatus` — статус одного замера (точка на графике).
+
+    `ok`        — probe прошёл, latency в пределах нормы.
+    `degraded`  — probe прошёл, но latency выше порога (медленно).
+    `down`      — probe не прошёл (HTTP error/timeout/connection refused).
+    `error`     — probe не выполнялся (нет api_base_url / circuit breaker open).
+    """
+    ok = 'ok'
+    degraded = 'degraded'
+    down = 'down'
+    error = 'error'
+
+
 class AuditAction(str, enum.Enum):
     invoice_cancelled = 'invoice_cancelled'
     invoice_paid = 'invoice_paid'
@@ -206,6 +224,7 @@ class AuditAction(str, enum.Enum):
     subscription_url_reissued = 'subscription_url_reissued'
     tariff_visibility_updated = 'tariff_visibility_updated'
     tariff_unlock_granted = 'tariff_unlock_granted'
+    node_health_alert = 'node_health_alert'
 
 
 class AuditActorType(str, enum.Enum):
@@ -873,12 +892,72 @@ class NodeRegistry(TimestampMixin, Base):
     last_health_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # FEA-ADMIN-NODE-MONITOR: денорм-поля последнего probe-замера.
+    # Обновляются `NodeProbeService` после каждого тика scheduler-job.
+    last_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_users_online: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_users_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_probe_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consecutive_fail_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=sa_text('0'),
+    )
+
     @property
     def is_routable(self) -> bool:
         return self.is_enabled and self.health_status in {
             NodeHealthStatus.healthy,
             NodeHealthStatus.degraded,
         }
+
+
+class NodeHealthSample(Base):
+    """Замер health-probe ноды (FEA-ADMIN-NODE-MONITOR).
+
+    Не наследует TimestampMixin: `ts` — единственная значимая метка времени,
+    `created_at`/`updated_at` тут шум. Партиционирование (если будет) — по `ts`.
+    Cleanup-job из `app.services.node_probe` удаляет записи старше 30 дней.
+    """
+
+    __tablename__ = 'node_health_samples'
+    __table_args__ = (
+        CheckConstraint(
+            'latency_ms IS NULL OR latency_ms >= 0',
+            name='ck_node_health_samples_latency_non_negative',
+        ),
+        CheckConstraint(
+            'users_total IS NULL OR users_total >= 0',
+            name='ck_node_health_samples_users_total_non_negative',
+        ),
+        CheckConstraint(
+            'users_online IS NULL OR users_online >= 0',
+            name='ck_node_health_samples_users_online_non_negative',
+        ),
+        Index('ix_node_health_samples_node_ts', 'node_id', sa_text('ts DESC')),
+        Index('ix_node_health_samples_ts', 'ts'),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey('node_registry.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=sa_text("timezone('utc', now())"),
+    )
+    status: Mapped[NodeHealthProbeStatus] = mapped_column(
+        Enum(NodeHealthProbeStatus, name='node_health_probe_status'),
+        nullable=False,
+    )
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    users_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    users_online: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class RoutingProfile(TimestampMixin, Base):
