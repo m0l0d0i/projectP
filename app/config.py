@@ -135,6 +135,7 @@ class Settings(BaseSettings):
 
     log_level: str = 'INFO'
     log_dir: str = 'logs'
+    log_format: str = 'text'
 
     webhook_enabled: bool = True
     webhook_base_url: str | None = None
@@ -438,6 +439,14 @@ class Settings(BaseSettings):
         normalized = value.strip().lower()
         if normalized not in {'mock', 'platega'}:
             raise ValueError('PAYMENT_PROVIDER должен быть mock или platega')
+        return normalized
+
+    @field_validator('log_format')
+    @classmethod
+    def validate_log_format(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {'text', 'json'}:
+            raise ValueError('LOG_FORMAT должен быть text или json')
         return normalized
 
     @field_validator('bot_token')

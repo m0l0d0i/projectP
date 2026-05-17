@@ -79,15 +79,28 @@ def _sentry_before_send(event, hint):
     return event
 
 
-def setup_logging(level: str, log_dir: str = 'logs') -> tuple[QueueListener, QueueListener]:
+def setup_logging(
+    level: str,
+    log_dir: str = 'logs',
+    log_format: str = 'text',
+) -> tuple[QueueListener, QueueListener]:
+    from app.observability.logging import ContextFilter, JSONFormatter
+
     root = logging.getLogger()
     root.setLevel(level.upper())
 
-    formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(name)s | %(message)s')
+    if log_format == 'json':
+        formatter: logging.Formatter = JSONFormatter()
+    else:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)s | %(name)s | req=%(request_id)s corr=%(correlation_id)s | %(message)s'
+        )
+    context_filter = ContextFilter()
     root.handlers.clear()
 
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
+    stream_handler.addFilter(context_filter)
 
     log_path = Path(log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
@@ -99,10 +112,11 @@ def setup_logging(level: str, log_dir: str = 'logs') -> tuple[QueueListener, Que
         encoding='utf-8',
     )
     file_handler.setFormatter(formatter)
+    file_handler.addFilter(context_filter)
 
-    # Используем QueueHandler для асинхронной записи в консоль и файлы без блокировки Event Loop
     log_queue = queue.Queue(-1)
     queue_handler = QueueHandler(log_queue)
+    queue_handler.addFilter(context_filter)
     root.addHandler(queue_handler)
 
     listener = QueueListener(log_queue, stream_handler, file_handler, respect_handler_level=True)
@@ -115,6 +129,7 @@ def setup_logging(level: str, log_dir: str = 'logs') -> tuple[QueueListener, Que
         encoding='utf-8',
     )
     audit_handler.setFormatter(formatter)
+    audit_handler.addFilter(context_filter)
 
     audit_logger = logging.getLogger('app.audit')
     audit_logger.setLevel(level.upper())
@@ -123,6 +138,7 @@ def setup_logging(level: str, log_dir: str = 'logs') -> tuple[QueueListener, Que
 
     audit_queue = queue.Queue(-1)
     audit_queue_handler = QueueHandler(audit_queue)
+    audit_queue_handler.addFilter(context_filter)
     audit_logger.addHandler(audit_queue_handler)
 
     audit_listener = QueueListener(audit_queue, audit_handler, respect_handler_level=True)
@@ -458,7 +474,7 @@ def _admin_runtime_payload(
 
 async def main() -> None:
     settings = get_settings()
-    log_listener, audit_listener = setup_logging(settings.log_level, settings.log_dir)
+    log_listener, audit_listener = setup_logging(settings.log_level, settings.log_dir, settings.log_format)
 
     engine = None
     sessionmaker = None
