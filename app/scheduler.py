@@ -13,6 +13,7 @@ from app.config import Settings
 from app.services.broadcast_polling import process_scheduled_broadcasts
 from app.services.marzban import MarzbanClient
 from app.services.notification_dispatcher import NotificationDispatcher
+from app.services.node_probe import cleanup_node_health_samples, probe_nodes_health
 from app.services.notifications import (
     check_expiring,
     check_low_traffic,
@@ -301,6 +302,33 @@ def build_scheduler(
             max_instances=1,
             misfire_grace_time=60,
         )
+
+    # FEA-ADMIN-NODE-MONITOR: probe нод каждые 90 сек. Используем notif_kwargs
+    # (тот же набор: bot/sessionmaker/settings/marzban + dispatcher), чтобы алерт
+    # node_down мог быть отправлен через NotificationDispatcher.
+    scheduler.add_job(
+        probe_nodes_health,
+        'interval',
+        seconds=90,
+        next_run_time=_utcnow(),
+        kwargs=notif_kwargs,
+        id='probe_nodes_health',
+        name='probe_nodes_health',
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=60,
+    )
+
+    scheduler.add_job(
+        cleanup_node_health_samples,
+        'interval',
+        hours=24,
+        kwargs={'sessionmaker': sessionmaker},
+        id='cleanup_node_health_samples',
+        name='cleanup_node_health_samples',
+        replace_existing=True,
+    )
 
     outbox_dispatcher = OutboxDispatcher(bot=bot, sessionmaker=sessionmaker)
     scheduler.add_job(

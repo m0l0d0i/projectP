@@ -39,6 +39,25 @@ SUPPORT_AI_CALLS = Counter(
     ['provider', 'status'],
 )
 
+# FEA-ADMIN-NODE-MONITOR (D12): per-node live-метрики, обновляются
+# `NodeProbeService` на каждом тике scheduler-job `probe_nodes_health`.
+NODE_LATENCY_SECONDS = Gauge(
+    'vpn_bot_node_latency_seconds',
+    'Последний замер latency probe-вызова /api/nodes для ноды (секунды)',
+    ['node'],
+)
+NODE_USERS_ONLINE = Gauge(
+    'vpn_bot_node_users_online',
+    'Текущее число активных пользователей панели Marzban (per-node агрегат, '
+    'обновляется только для default-ноды — Marzban API не даёт breakdown)',
+    ['node'],
+)
+NODE_HEALTH = Gauge(
+    'vpn_bot_node_health',
+    'Текущее состояние ноды: 1 — ok, 0 — degraded/down/error (последний probe)',
+    ['node'],
+)
+
 
 def notification_counters_snapshot() -> dict[str, dict[str, float]]:
     """Снимок in-process Prometheus-counter'ов NotificationDispatcher.

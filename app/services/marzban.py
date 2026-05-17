@@ -550,6 +550,17 @@ class MarzbanClient:
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
 
+    async def get_system_stats(self) -> dict[str, Any]:
+        """Сырые stats панели Marzban (FEA-ADMIN-NODE-MONITOR).
+
+        Используется `NodeProbeService` для извлечения `total_user` и
+        `users_active` (online). Полей у Marzban много (mem/cpu/bandwidth);
+        возвращаем raw payload — фильтрация на стороне consumer'а.
+        """
+        response = await self._request('GET', '/api/system')
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
     async def list_nodes(self) -> list[MarzbanNodeSnapshot]:
         response = await self._request('GET', '/api/nodes')
         payload = response.json()
