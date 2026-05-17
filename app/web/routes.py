@@ -17,7 +17,7 @@ import tempfile
 import time
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -34,6 +34,7 @@ from app.db.models import (
     AuditActorType,
     AuditLog,
     BroadcastJobStatus,
+    Invoice,
     InvoiceStatus,
     LLMProviderKind,
     NodeHealthStatus,
@@ -8535,6 +8536,43 @@ async def admin_invoices(
         repo = InvoiceRepository(session)
         invoices = await repo.list_recent(limit=500, offset=0)
 
+    # FEA-ADMIN-CRUD-EXPAND: per-provider статистика из загруженной выборки.
+    # Берём ту же 500-инвойсную выборку, что и для списка, чтобы не делать
+    # лишних запросов и видеть стат-снимок по «свежим» инвойсам.
+    provider_stats_map: dict[str, dict[str, Any]] = {}
+    pending_stale_count = 0
+    pending_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    for inv in invoices:
+        provider_key = (getattr(inv, 'provider', None) or 'unknown')
+        status_value = getattr(getattr(inv, 'status', None), 'value', getattr(inv, 'status', None))
+        bucket = provider_stats_map.setdefault(
+            provider_key,
+            {'provider': provider_key, 'total': 0, 'paid': 0, 'pending': 0, 'cancelled': 0,
+             'paid_amount': Decimal('0.00')},
+        )
+        bucket['total'] += 1
+        if status_value == 'paid' or status_value == 'consumed':
+            bucket['paid'] += 1
+            try:
+                bucket['paid_amount'] += Decimal(str(getattr(inv, 'payable_amount', '0') or '0'))
+            except (InvalidOperation, ValueError):
+                pass
+        elif status_value == 'pending':
+            bucket['pending'] += 1
+            created_at = getattr(inv, 'created_at', None)
+            if created_at is not None and created_at < pending_cutoff:
+                pending_stale_count += 1
+        elif status_value == 'cancelled':
+            bucket['cancelled'] += 1
+
+    provider_stats = sorted(
+        (
+            {**bucket, 'paid_amount_str': f'{bucket["paid_amount"]:.2f}'}
+            for bucket in provider_stats_map.values()
+        ),
+        key=lambda b: (-b['total'], b['provider']),
+    )
+
     filtered = [invoice for invoice in invoices if _invoice_matches_status(invoice, status_filter) and _invoice_matches_query(invoice, query)]
     offset = (page - 1) * page_size
     page_items = filtered[offset : offset + page_size + 1]
@@ -8570,7 +8608,68 @@ async def admin_invoices(
             'page': page,
             'has_next_page': has_next_page,
             'has_prev': page > 1,
+            'provider_stats': provider_stats,
+            'pending_stale_count': pending_stale_count,
+            'pending_stale_cutoff_hours': 24,
         },
+    )
+
+
+@router.post('/admin/invoices/bulk-cancel-stale', dependencies=[Depends(require_finance)])
+async def admin_invoices_bulk_cancel_stale(request: Request):
+    """Массовая отмена pending-инвойсов старше 24ч (FEA-ADMIN-CRUD-EXPAND).
+
+    Только status=pending + created_at < now-24h. consumed/applying/paid
+    не трогаем. Direct DB-mutation (без вызова payment-провайдера) —
+    pending значит, что external-провайдер либо не получил callback, либо
+    клиент закрыл окно оплаты; в любом случае такой счёт безопасно
+    отменить. Аудит — на каждый отменённый, action=admin_action,
+    details.action='cancel_invoice_bulk_stale'.
+    """
+    sessionmaker = request.app.state.sessionmaker
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cancelled_count = 0
+    cancelled_by_provider: dict[str, int] = {}
+
+    async with sessionmaker.begin() as session:
+        audit_repo = AuditLogRepository(session)
+        res = await session.execute(
+            select(Invoice)
+            .where(Invoice.status == InvoiceStatus.pending, Invoice.created_at < cutoff)
+            .with_for_update()
+        )
+        invoices = list(res.scalars().all())
+
+        for invoice in invoices:
+            invoice.status = InvoiceStatus.cancelled
+            invoice.idempotency_key = None
+            provider_key = (invoice.provider or 'unknown')
+            cancelled_by_provider[provider_key] = cancelled_by_provider.get(provider_key, 0) + 1
+            await audit_repo.create(
+                action=AuditAction.admin_action,
+                actor_type=AuditActorType.admin,
+                actor_tg_id=None,
+                entity_type='invoice',
+                entity_id=str(invoice.id),
+                details={
+                    'action': 'cancel_invoice_bulk_stale',
+                    'provider': provider_key,
+                    'purpose': getattr(getattr(invoice, 'purpose', None), 'value', None),
+                    'created_at': invoice.created_at.isoformat() if invoice.created_at else None,
+                    'cutoff_hours': 24,
+                },
+            )
+            cancelled_count += 1
+
+    if cancelled_count == 0:
+        return _redirect_with_message(
+            '/admin/invoices/',
+            success='Не найдено pending-инвойсов старше 24ч',
+        )
+    by_provider = ', '.join(f'{p}: {n}' for p, n in sorted(cancelled_by_provider.items()))
+    return _redirect_with_message(
+        '/admin/invoices/',
+        success=f'Отменено инвойсов: {cancelled_count} ({by_provider})',
     )
 
 

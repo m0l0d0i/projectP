@@ -18,6 +18,57 @@
   {% if success_message %}<div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">✅ {{ success_message }}</div>{% endif %}
   {% if error_message %}<div class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">❌ {{ error_message }}</div>{% endif %}
 
+  {% if provider_stats %}
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h2 class="text-lg font-semibold text-white">
+          Статистика по провайдерам
+          <span class="help-dot" tabindex="0" data-tooltip="Снимок по последним 500 инвойсам. Группировка по invoices.provider; paid_amount складывается по статусам paid и consumed.">?</span>
+        </h2>
+        <p class="mt-1 text-xs text-slate-500">Окно: 500 последних инвойсов из БД.</p>
+      </div>
+      <form method="post" action="/admin/invoices/bulk-cancel-stale" data-confirm="Отменить все pending-инвойсы старше {{ pending_stale_cutoff_hours }} ч?">
+        <button
+          type="submit"
+          class="inline-flex items-center justify-center rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Найти все pending-инвойсы старше {{ pending_stale_cutoff_hours }} ч и установить status=cancelled. Direct DB-мутация, без обращения к платёжному провайдеру."
+          {% if pending_stale_count == 0 %}disabled{% endif %}
+        >
+          🧹 Отменить pending старше {{ pending_stale_cutoff_hours }} ч{% if pending_stale_count %} ({{ pending_stale_count }}){% endif %}
+        </button>
+      </form>
+    </div>
+
+    <div class="mt-4 overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800">
+        <thead class="bg-slate-900/40">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Провайдер</th>
+            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Всего</th>
+            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Paid/consumed</th>
+            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Pending</th>
+            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Cancelled</th>
+            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Σ paid</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% for stat in provider_stats %}
+          <tr>
+            <td class="px-4 py-2 text-sm font-semibold text-white">{{ stat.provider }}</td>
+            <td class="px-4 py-2 text-sm text-slate-300">{{ stat.total }}</td>
+            <td class="px-4 py-2 text-sm text-emerald-300">{{ stat.paid }}</td>
+            <td class="px-4 py-2 text-sm text-amber-300">{{ stat.pending }}</td>
+            <td class="px-4 py-2 text-sm text-slate-400">{{ stat.cancelled }}</td>
+            <td class="px-4 py-2 text-sm text-slate-300">{{ stat.paid_amount_str }} ₽</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
     <form method="get" action="/admin/invoices/" class="grid gap-3 md:grid-cols-3">
       <div>
