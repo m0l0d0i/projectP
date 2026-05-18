@@ -199,7 +199,7 @@ async def _claim_next_job(sessionmaker: async_sessionmaker):
         if job is None:
             return None
 
-        total_users = await user_repo.count_broadcast_recipients()
+        total_users = await user_repo.count_broadcast_recipients(segment=job.audience_segment)
         job.total_users = total_users
 
         logger.info(
@@ -266,6 +266,7 @@ async def _load_job_chunk(
         users = await user_repo.list_broadcast_recipients_chunk(
             after_id=after_id,
             limit=batch_size,
+            segment=job.audience_segment,
         )
 
         if not users:

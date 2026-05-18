@@ -477,34 +477,29 @@ class UserRepository:
         )
         return int(res.scalar_one())
 
-    async def count_broadcast_recipients(self) -> int:
-        res = await self.session.execute(
-            select(func.count(User.id)).where(
-                User.bot_blocked.is_(False),
-                User.is_blocked.is_(False),
-            )
-        )
+    async def count_broadcast_recipients(self, *, segment: str | None = None) -> int:
+        from app.services.segments import apply_segment_filter
+        stmt = select(func.count(User.id))
+        stmt = apply_segment_filter(stmt, segment)
+        res = await self.session.execute(stmt)
         return int(res.scalar_one())
 
     async def list_broadcast_recipients_chunk(
         self,
         after_id: int = 0,
         limit: int = 1000,
+        *,
+        segment: str | None = None,
     ) -> list[User]:
-        res = await self.session.execute(
-            select(User)
-            .where(
-                User.id > after_id,
-                User.bot_blocked.is_(False),
-                User.is_blocked.is_(False),
-            )
-            .order_by(User.id.asc())
-            .limit(limit)
-        )
+        from app.services.segments import apply_segment_filter
+        stmt = select(User).where(User.id > after_id)
+        stmt = apply_segment_filter(stmt, segment)
+        stmt = stmt.order_by(User.id.asc()).limit(limit)
+        res = await self.session.execute(stmt)
         return list(res.scalars().all())
 
-    async def list_broadcast_recipients(self, *, after_id: int = 0, limit: int = 1000) -> list[User]:
-        return await self.list_broadcast_recipients_chunk(after_id=after_id, limit=limit)
+    async def list_broadcast_recipients(self, *, after_id: int = 0, limit: int = 1000, segment: str | None = None) -> list[User]:
+        return await self.list_broadcast_recipients_chunk(after_id=after_id, limit=limit, segment=segment)
 
 
 class AppSettingsRepository:
@@ -3273,6 +3268,7 @@ class BroadcastJobRepository:
         photo_file_unique_id: str | None = None,
         media_type: str | None = None,
         keyboard_json: list | tuple | None = None,
+        audience_segment: str | None = None,
     ) -> BroadcastJob:
         normalized_run_at = _normalize_utc_datetime(run_at)
         if normalized_run_at is None:
@@ -3282,6 +3278,7 @@ class BroadcastJobRepository:
             created_by_tg_id=int(created_by_tg_id),
             run_at=normalized_run_at,
             status=self._normalize_status(status),
+            audience_segment=_normalize_optional_str(audience_segment),
         )
         self._apply_content(
             job,

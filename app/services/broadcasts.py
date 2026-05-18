@@ -336,7 +336,9 @@ class BroadcastService:
         status: BroadcastJobStatus = BroadcastJobStatus.scheduled,
         actor_tg_id: int | None = None,
         actor_type: AuditActorType = AuditActorType.admin,
+        audience_segment: str | None = None,
     ) -> BroadcastJob:
+        from app.services.segments import normalize_segment, BroadcastSegment
         payload = self.build_payload(
             text=text,
             photo_file_id=photo_file_id,
@@ -346,6 +348,9 @@ class BroadcastService:
             keyboard_json_raw=keyboard_json_raw,
         )
         normalized_run_at = self._normalize_run_at(run_at)
+        normalized_segment = normalize_segment(audience_segment)
+        # NULL в БД = all (legacy-compat); сохраняем NULL когда сегмент = all.
+        segment_for_db = None if normalized_segment == BroadcastSegment.all.value else normalized_segment
 
         job = await self.jobs.create(
             created_by_tg_id=int(created_by_tg_id),
@@ -357,6 +362,7 @@ class BroadcastService:
             keyboard_json=payload.keyboard_json,
             payload_json=payload.payload_json,
             status=status,
+            audience_segment=segment_for_db,
         )
         await self.audit.create(
             action=AuditAction.broadcast_created,
@@ -370,6 +376,7 @@ class BroadcastService:
                 'text_preview': (payload.text or '')[:500],
                 'has_photo': bool(payload.photo_file_id),
                 'button_count': sum(len(row) for row in payload.keyboard),
+                'audience_segment': normalized_segment,
             },
         )
         await self.session.flush()

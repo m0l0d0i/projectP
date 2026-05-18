@@ -1479,6 +1479,9 @@ class BroadcastJob(TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # FEA-C33: код сегмента аудитории (BroadcastSegment enum в app/services/segments.py).
+    # NULL = all (для обратной совместимости со старыми job'ами).
+    audience_segment: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     deliveries: Mapped[list['BroadcastJobDelivery']] = relationship(
         back_populates='job',
