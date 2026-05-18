@@ -395,12 +395,20 @@ class BroadcastService:
         keyboard_json_raw: str | None = None,
         actor_tg_id: int | None = None,
         actor_type: AuditActorType = AuditActorType.admin,
+        audience_segment: str | None = None,
     ) -> BroadcastJob:
+        from app.services.segments import BroadcastSegment, normalize_segment
         job = await self.jobs.get_by_id_for_update(job_id)
         if job is None:
             raise BroadcastValidationError('Рассылка не найдена.')
         if not getattr(job, 'is_editable', job.status in {BroadcastJobStatus.draft, BroadcastJobStatus.scheduled}):
             raise BroadcastValidationError('Редактировать можно только draft и scheduled рассылки.')
+
+        if audience_segment is not None:
+            normalized_segment = normalize_segment(audience_segment)
+            job.audience_segment = (
+                None if normalized_segment == BroadcastSegment.all.value else normalized_segment
+            )
 
         payload = self.build_payload(
             text=text,

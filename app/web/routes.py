@@ -1592,16 +1592,19 @@ def _broadcast_edit_form_defaults(job) -> dict[str, object]:
         'photo_file_unique_id': getattr(job, 'photo_file_unique_id', '') or '',
         'keyboard_json': _broadcast_keyboard_json_pretty(job),
         'status': status_value,
+        'audience_segment': getattr(job, 'audience_segment', None) or 'all',
     }
 
 
 def _broadcast_row(job) -> dict[str, object]:
+    from app.services.segments import SEGMENT_LABELS, BroadcastSegment
     status_value = getattr(getattr(job, 'status', None), 'value', getattr(job, 'status', None)) or ''
     if status_value == 'pending':
         status_value = 'scheduled'
     preview = getattr(job, 'content_preview_text', None) or getattr(job, 'text', None) or ''
     if not (preview or '').strip() and getattr(job, 'photo_file_id', None):
         preview = 'Фото без подписи'
+    segment_code = getattr(job, 'audience_segment', None) or BroadcastSegment.all.value
     return {
         'job': job,
         'id': getattr(job, 'id', None),
@@ -1616,6 +1619,8 @@ def _broadcast_row(job) -> dict[str, object]:
         'can_request_cancel': bool(getattr(job, 'can_request_cancel', False)),
         'is_terminal': bool(getattr(job, 'is_terminal', False)),
         'cancel_requested': bool(getattr(job, 'cancel_requested_at', None)),
+        'audience_segment_code': segment_code,
+        'audience_segment_label': SEGMENT_LABELS.get(segment_code, segment_code),
     }
 
 
@@ -7423,12 +7428,15 @@ async def admin_broadcasts(
         total = await _broadcast_count_filtered(repo, status_filter=status_filter)
         summary_counts = await _broadcast_summary_counts(repo)
         edit_job = await repo.get_by_id(edit_id) if edit_id else None
-        # FEA-ADMIN-CRUD-EXPAND: предпросмотр реальной аудитории.
-        # `count_broadcast_recipients` исключает bot_blocked + is_blocked; это
-        # то же условие, что `broadcast_polling._claim_next_job` использует
-        # для нарезки чанков. Показываем единожды на странице — сегментация
-        # пока не реализована, поэтому число одинаково для всех job'ов.
-        broadcast_recipients_count = await user_repo.count_broadcast_recipients()
+        # FEA-ADMIN-CRUD-EXPAND + FEA-C33: предпросмотр реальной аудитории
+        # по сегментам. Считаем сразу все 5 сегментов (≤ 5 запросов на page-load,
+        # неоптимизированно но прозрачно). Если медленно — переделать на
+        # один CTE с CASE-ветками.
+        from app.services.segments import BroadcastSegment, SEGMENT_LABELS
+        segment_counts: dict[str, int] = {}
+        for seg in BroadcastSegment:
+            segment_counts[seg.value] = await user_repo.count_broadcast_recipients(segment=seg.value)
+        broadcast_recipients_count = segment_counts[BroadcastSegment.all.value]
 
     rows = [_broadcast_row(job) for job in jobs]
     edit_form = _broadcast_edit_form_defaults(edit_job) if edit_job is not None else {
@@ -7439,6 +7447,7 @@ async def admin_broadcasts(
         'photo_file_unique_id': '',
         'keyboard_json': '',
         'status': 'scheduled',
+        'audience_segment': 'all',
     }
     preview_payload = None
     if edit_job is not None:
@@ -7477,6 +7486,8 @@ async def admin_broadcasts(
             'edit_form': edit_form,
             'preview_payload': preview_payload,
             'broadcast_recipients_count': broadcast_recipients_count,
+            'segment_options': [(seg.value, SEGMENT_LABELS[seg.value], segment_counts[seg.value]) for seg in BroadcastSegment],
+            'segment_default': BroadcastSegment.all.value,
             'has_prev': page > 1,
             'has_next': offset + len(jobs) < total,
             'success_message': request.query_params.get('success'),
@@ -7496,6 +7507,7 @@ async def admin_broadcasts_upsert(
     photo_file_unique_id: str | None = Form(default=None),
     keyboard_json: str | None = Form(default=None),
     status_value: str | None = Form(default='scheduled', alias='status'),
+    audience_segment: str | None = Form(default=None),
 ):
     sessionmaker = request.app.state.sessionmaker
     settings = request.app.state.settings
@@ -7526,6 +7538,7 @@ async def admin_broadcasts_upsert(
                     media_type='photo' if (photo_file_id or '').strip() else None,
                     keyboard_json_raw=keyboard_json,
                     status=BroadcastJobStatus.draft if normalized_status == 'draft' else BroadcastJobStatus.scheduled,
+                    audience_segment=audience_segment,
                 )
                 message = 'Черновик создан' if normalized_status == 'draft' else 'Рассылка создана'
                 return _redirect_with_message('/admin/broadcasts/', success=message)
@@ -7541,6 +7554,7 @@ async def admin_broadcasts_upsert(
                     photo_file_unique_id=photo_file_unique_id,
                     media_type='photo' if (photo_file_id or '').strip() else None,
                     keyboard_json_raw=keyboard_json,
+                    audience_segment=audience_segment,
                 )
                 # optional draft -> scheduled promotion/demotion by direct status write for editable jobs
                 target_status = BroadcastJobStatus.draft if normalized_status == 'draft' else BroadcastJobStatus.scheduled
