@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import select, text, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,6 +80,7 @@ from app.services.geodata_updater import GeodataUpdater
 from app.services.marzban import MarzbanClient
 from app.services.marzban_env_manager import MarzbanEnvManager
 from app.services.marzban_template_renderer import MarzbanTemplateRenderer
+from app.services.privacy import PrivacyService
 from app.services.node_policy import NodePolicyService
 from app.services.payment_engine import PaymentService
 from app.services.payments import MockPaymentProvider, PaymentProvider, PlategaProvider
@@ -3066,6 +3067,91 @@ async def admin_user_unblock(
             details={'previous_reason': previous_reason},
         )
     return _redirect_with_message(redirect, success='Пользователь разблокирован')
+
+
+@router.get('/admin/users/{user_id}/export.json', dependencies=[Depends(require_support)])
+async def admin_user_export_data(
+    request: Request,
+    user_id: int,
+    principal: WebAdminPrincipal = Depends(require_support),
+):
+    """CMP-1: GDPR-style JSON-экспорт PII пользователя.
+    Audit пишется в отдельной транзакции после построения payload'а.
+    """
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+
+    async with sessionmaker() as session:
+        user = await UserRepository(session).get_by_id(user_id)
+        if user is None:
+            return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+        privacy = PrivacyService(session, settings)
+        data = await privacy.export_user_data(user)
+
+    async with sessionmaker.begin() as session:
+        await AuditLogRepository(session).create(
+            action=AuditAction.user_data_exported,
+            actor_type=AuditActorType.admin,
+            actor_tg_id=None,
+            actor_username=principal.username,
+            entity_type='user',
+            entity_id=str(user_id),
+            details={'source': 'admin_panel'},
+        )
+
+    payload = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+    return Response(
+        content=payload,
+        media_type='application/json',
+        headers={
+            'Content-Disposition': f'attachment; filename="vpn_bot_user_{user_id}_export.json"',
+            'Cache-Control': 'no-store',
+        },
+    )
+
+
+@router.post('/admin/users/{user_id}/erase', dependencies=[Depends(require_superadmin)])
+async def admin_user_erase(
+    request: Request,
+    user_id: int,
+    confirm: str = Form(default=''),
+    principal: WebAdminPrincipal = Depends(require_superadmin),
+):
+    """CMP-1: GDPR-style anonymize-erase. Только superadmin — операция
+    необратима. Требует confirm='ERASE' в форме (защита от случайного
+    клика).
+    """
+    sessionmaker = request.app.state.sessionmaker
+    settings: Settings = request.app.state.settings
+    redirect = f'/admin/users/{user_id}'
+
+    if confirm.strip() != 'ERASE':
+        return _redirect_with_message(redirect, error='Подтверждение не пройдено: введите ERASE')
+
+    marzban_client: MarzbanClient | None = None
+    if settings.marzban_enabled:
+        marzban_client = MarzbanClient(settings)
+
+    try:
+        async with sessionmaker.begin() as session:
+            user = await UserRepository(session).get_by_id_for_update(user_id)
+            if user is None:
+                return _redirect_with_message('/admin/users/', error='Пользователь не найден')
+            if user.anonymized_at is not None:
+                return _redirect_with_message(redirect, error='Аккаунт уже анонимизирован')
+            privacy = PrivacyService(session, settings, marzban=marzban_client)
+            await privacy.erase_user(
+                user,
+                actor_tg_id=None,
+                actor_username=principal.username,
+                actor_type=AuditActorType.admin,
+            )
+    finally:
+        if marzban_client is not None:
+            with suppress(Exception):
+                await marzban_client.close()
+
+    return _redirect_with_message('/admin/users/', success=f'Аккаунт {user_id} анонимизирован')
 
 
 @router.post('/admin/users/{user_id}/trial-reset', dependencies=[Depends(require_support)])

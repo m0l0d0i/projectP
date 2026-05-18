@@ -301,6 +301,30 @@
     </div>
   </div>
 
+  <div class="rounded-3xl border border-rose-500/30 bg-rose-500/5 p-6 shadow-xl">
+    <h2 class="text-xl font-semibold text-white">GDPR — данные пользователя</h2>
+    <p class="mt-2 text-sm text-slate-400">
+      Экспорт собирает PII (профиль, подписки, инвойсы, тикеты) в JSON-файл.
+      Удаление безвозвратно анонимизирует профиль: PII очищается, баланс обнуляется,
+      подписки отключаются (с deactivate в Marzban), тикеты закрываются. Инвойсы и
+      audit-логи остаются для compliance.
+    </p>
+    <div class="mt-4 flex flex-wrap gap-3">
+      <a href="/admin/users/{{ user.id }}/export.json" class="rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-sm font-semibold text-slate-100">
+        📦 Скачать JSON
+      </a>
+      {% if user.anonymized_at %}
+      <span class="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-400">Аккаунт уже анонимизирован</span>
+      {% else %}
+      <form method="post" action="/admin/users/{{ user.id }}/erase" class="flex items-center gap-2" data-confirm="GDPR-удаление НЕОБРАТИМО. Введите ERASE в поле подтверждения и нажмите кнопку.">
+        {{ csrf_input(request)|safe }}
+        <input type="text" name="confirm" placeholder="ERASE" class="rounded-xl border border-rose-500/40 bg-slate-950 px-3 py-2 text-sm text-rose-200 placeholder-rose-500/60" required>
+        <button type="submit" class="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200">🗑 Удалить (anonymize)</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 shadow-xl">
     <div class="border-b border-slate-800 px-6 py-5">
       <div class="flex flex-wrap items-center gap-3">
