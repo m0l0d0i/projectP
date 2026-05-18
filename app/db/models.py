@@ -225,6 +225,8 @@ class AuditAction(str, enum.Enum):
     tariff_visibility_updated = 'tariff_visibility_updated'
     tariff_unlock_granted = 'tariff_unlock_granted'
     node_health_alert = 'node_health_alert'
+    user_data_exported = 'user_data_exported'
+    user_erased = 'user_erased'
 
 
 class AuditActorType(str, enum.Enum):
@@ -310,6 +312,12 @@ class User(TimestampMixin, Base):
     )
     bot_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     bot_blocked_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # CMP-1 (GDPR): timestamp анонимизации. PII-колонки (username/first_name/
+    # last_name/admin_notes/tags) очищаются, балансы → 0, tg_id сдвигается
+    # в отрицательный sentinel-диапазон (-10**12 - id) чтобы остаться
+    # уникальным и не конфликтовать с реальными tg_id (всегда положительные).
+    anonymized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
     # FEA-ADMIN-USER-CRM: служебные заметки админа и теги (vip / chargeback /
     # support_priority / ...). Заметки видит только web-admin; теги
