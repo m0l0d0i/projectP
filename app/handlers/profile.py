@@ -1,23 +1,29 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.text_decorations import html_decoration as fmt
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
+from app.db.models import AuditActorType
 from app.db.repositories import SubscriptionRepository
 from app.handlers.common import get_or_create_user
 from app.i18n import all_translations
 from app.keyboards.inline import (
     ProfileCallback,
+    erase_confirm_keyboard,
     profile_keyboard,
     referral_list_back_keyboard,
     referral_program_keyboard,
 )
+from app.services.marzban import MarzbanClient
+from app.services.privacy import PrivacyService
 from app.services.promos import PromoService
 from app.services.referrals import ReferralService
 from app.states.profile import ProfileState
@@ -263,3 +269,80 @@ async def profile_referral_code_input(message: Message, session: AsyncSession, s
     _ok, msg = await ReferralService(session).redeem_referral_code(user.tg_id, code)
     await message.answer(msg)
     await state.clear()
+
+
+# CMP-1 GDPR: self-service export + erase из бота.
+
+@router.callback_query(ProfileCallback.filter(F.action == 'export_data'))
+async def profile_export_data(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    settings: Settings,
+    _: Callable[[str], str],
+) -> None:
+    from app.db.models import AuditAction
+    from app.db.repositories import AuditLogRepository
+
+    user = await get_or_create_user(callback, session)
+    privacy = PrivacyService(session, settings)
+    data = await privacy.export_user_data(user)
+    payload = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+    document = BufferedInputFile(payload, filename=f'vpn_bot_export_{user.id}.json')
+
+    await AuditLogRepository(session).create(
+        action=AuditAction.user_data_exported,
+        actor_type=AuditActorType.user,
+        actor_tg_id=user.tg_id,
+        entity_type='user',
+        entity_id=str(user.id),
+        details={'source': 'bot_self_service'},
+    )
+
+    await callback.message.answer_document(
+        document,
+        caption=_('📦 Экспорт ваших данных (JSON). Файл содержит все PII, известные сервису.'),
+    )
+    await callback.answer()
+
+
+@router.callback_query(ProfileCallback.filter(F.action == 'erase_request'))
+async def profile_erase_request(
+    callback: CallbackQuery,
+    _: Callable[[str], str],
+) -> None:
+    text = (
+        _('🗑 <b>Удаление аккаунта</b>') + '\n\n'
+        + _('Будут <b>безвозвратно</b> удалены ваши имя/username, обнулён баланс, '
+            'отключены все активные подписки (с deactivate в Marzban) и закрыты тикеты поддержки.') + '\n\n'
+        + _('История оплаченных счетов остаётся для бухгалтерской отчётности '
+            '(анонимизированно — без вашего имени), это требование законодательства РФ и AML.') + '\n\n'
+        + _('Восстановить аккаунт после удаления нельзя. Подтверждаете?')
+    )
+    await safe_edit_message_text(callback.message, text, reply_markup=erase_confirm_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(ProfileCallback.filter(F.action == 'erase_confirm'))
+async def profile_erase_confirm(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    settings: Settings,
+    marzban: MarzbanClient,
+    _: Callable[[str], str],
+) -> None:
+    user = await get_or_create_user(callback, session)
+    if user.anonymized_at is not None:
+        await callback.answer(_('Аккаунт уже удалён.'), show_alert=True)
+        return
+
+    privacy = PrivacyService(session, settings, marzban=marzban)
+    await privacy.erase_user(
+        user,
+        actor_tg_id=user.tg_id,
+        actor_type=AuditActorType.user,
+    )
+    await safe_edit_reply_markup(callback.message, reply_markup=None)
+    await callback.message.answer(
+        _('✅ Ваши данные удалены. Спасибо, что пользовались сервисом.'),
+    )
+    await callback.answer()

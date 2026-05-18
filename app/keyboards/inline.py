@@ -596,7 +596,18 @@ def profile_keyboard(*, show_referral_code: bool = True) -> InlineKeyboardMarkup
     ]
     if show_referral_code:
         rows.append([InlineKeyboardButton(text='🎟️ Промокод реферала', callback_data=ProfileCallback(action='referral_code').pack())])
+    rows.append([InlineKeyboardButton(text='📦 Экспорт моих данных', callback_data=ProfileCallback(action='export_data').pack())])
+    rows.append([InlineKeyboardButton(text='🗑 Удалить мои данные', callback_data=ProfileCallback(action='erase_request').pack())])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def erase_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text='🗑 Да, удалить безвозвратно', callback_data=ProfileCallback(action='erase_confirm').pack())],
+            [InlineKeyboardButton(text='⬅️ Отмена', callback_data=ProfileCallback(action='back').pack())],
+        ]
+    )
 
 
 def profile_back_keyboard() -> InlineKeyboardMarkup:
